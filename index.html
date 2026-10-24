@@ -9138,6 +9138,8 @@ return { get Audio() { return Audio; } };
 const __m_src_core_saves_js = (() => {
 // 存档槽：3 个槽位，当前槽位自动保存。每个槽位存一份完整的游戏存档（格式见 main.js 的 snapshot()）。
 const SLOT_COUNT = 3;
+// 存档格式版本（main.js 的 snapshot() 写进 v）：v12 = v0.11.4（建筑和核心的手动标记）
+const SAVE_VERSION = 12;
 const slotKey = (n) => `sg2.slot.${n}`;
 const META_KEY = 'sg2.slots';
 // v0.9.1 之前只有一个存档，第一次打开时搬到槽位 1
@@ -9171,6 +9173,10 @@ function deleteSlot(n) {
 function slotInfo(n) {
   const s = readSlot(n);
   if (!s) return { n, empty: true };
+  return summarize(s, n);
+}
+// 一份存档的概要（槽位卡片和导入预览共用）
+function summarize(s, n = 0) {
   const m = s.meta || {};
   const eco = s.eco || {};
   return {
@@ -9224,13 +9230,95 @@ function migrateLegacy() {
   return moved;
 }
 
-return { get SLOT_COUNT() { return SLOT_COUNT; }, get currentSlot() { return currentSlot; }, get setCurrentSlot() { return setCurrentSlot; }, get readSlot() { return readSlot; }, get writeSlot() { return writeSlot; }, get deleteSlot() { return deleteSlot; }, get slotInfo() { return slotInfo; }, get listSlots() { return listSlots; }, get latestSlot() { return latestSlot; }, get migrateLegacy() { return migrateLegacy; } };
+return { get SLOT_COUNT() { return SLOT_COUNT; }, get SAVE_VERSION() { return SAVE_VERSION; }, get currentSlot() { return currentSlot; }, get setCurrentSlot() { return setCurrentSlot; }, get readSlot() { return readSlot; }, get writeSlot() { return writeSlot; }, get deleteSlot() { return deleteSlot; }, get slotInfo() { return slotInfo; }, get summarize() { return summarize; }, get listSlots() { return listSlots; }, get latestSlot() { return latestSlot; }, get migrateLegacy() { return migrateLegacy; } };
+})();
+
+// ---- src/core/saveTransfer.js ----
+const __m_src_core_saveTransfer_js = (() => {
+// 存档导出 / 导入：在 iPhone 和电脑之间搬存档（存档只存在各自浏览器的本地存储里）。
+// 存档码 = 「SG2Z:」+ base64(gzip(JSON))；浏览器不支持压缩时用「SG2J:」+ base64(JSON)。
+// JSON 是 { sg2: 1, slot, at, save }，save 就是存档槽里的原样内容（读档时走现有的版本迁移）。
+// 导入也接受直接粘贴的存档 JSON。
+const { SAVE_VERSION } = __m_src_core_saves_js;
+const { GEN_LATEST } = __m_src_world_world_js;
+
+const PRE_Z = 'SG2Z:';
+const PRE_J = 'SG2J:';
+
+function toB64(bytes) {
+  let s = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+function fromB64(str) {
+  const s = atob(str);
+  const a = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) a[i] = s.charCodeAt(i);
+  return a;
+}
+async function pipe(bytes, Stream) {
+  const r = new Blob([bytes]).stream().pipeThrough(new Stream('gzip'));
+  return new Uint8Array(await new Response(r).arrayBuffer());
+}
+
+// 存档 → 存档码
+async function encodeSave(save, slot = 0) {
+  const raw = new TextEncoder().encode(JSON.stringify({ sg2: 1, slot, at: Date.now(), save }));
+  if (typeof CompressionStream === 'function') {
+    try { return PRE_Z + toB64(await pipe(raw, CompressionStream)); } catch (e) { /* 退回不压缩 */ }
+  }
+  return PRE_J + toB64(raw);
+}
+
+// 能不能读：返回空串 = 可以，否则是原因
+function checkSave(s) {
+  if (!s || typeof s !== 'object' || !s.eco || !s.world) return '这不是 Space Garden 的存档';
+  const v = s.v || 4;
+  if (!Number.isFinite(v)) return '存档格式不对';
+  if (v > SAVE_VERSION) return `这份存档来自更新的版本（存档格式 v${v}，这里只认到 v${SAVE_VERSION}）：先把这边的游戏更新到最新`;
+  if ((s.gen || 1) > GEN_LATEST) return '这份存档的星域来自更新的版本：先把这边的游戏更新到最新';
+  return '';
+}
+
+// 存档码 / 文件内容 / 存档 JSON → { ok, save, slot, at, msg }
+async function decodeSave(text) {
+  const t = String(text == null ? '' : text).trim();
+  if (!t) return { ok: false, msg: '' };
+  let obj = null;
+  try {
+    const head = t.slice(0, 5).toUpperCase();
+    if (head === PRE_Z || head === PRE_J) {
+      const bytes = fromB64(t.slice(5).replace(/[^A-Za-z0-9+/=]/g, ''));   // 去掉复制时混进来的换行和空格
+      let raw = bytes;
+      if (head === PRE_Z) {
+        if (typeof DecompressionStream !== 'function') return { ok: false, msg: '这个浏览器不支持解压存档码：换一个新一点的浏览器，或者在导出的那边改用文件' };
+        raw = await pipe(bytes, DecompressionStream);
+      }
+      obj = JSON.parse(new TextDecoder().decode(raw));
+    } else if (t[0] === '{') obj = JSON.parse(t);
+    else return { ok: false, msg: '认不出这段内容：存档码应该以「SG2Z:」开头' };
+  } catch (e) {
+    return { ok: false, msg: '存档码不完整或已损坏：重新复制一次，确认从头到尾都复制上了' };
+  }
+  const save = obj && obj.sg2 ? obj.save : obj;
+  const why = checkSave(save);
+  if (why) return { ok: false, msg: why };
+  return { ok: true, save, slot: (obj && obj.slot) || 0, at: (obj && obj.at) || 0, msg: '' };
+}
+
+// 导出文件名：SpaceGarden-slot1-20261024-2130.txt（只用英文和数字：有的浏览器遇到中文文件名会改成「download」）
+function exportName(n, t = new Date()) {
+  const p = (x) => String(x).padStart(2, '0');
+  return `SpaceGarden-slot${n}-${t.getFullYear()}${p(t.getMonth() + 1)}${p(t.getDate())}-${p(t.getHours())}${p(t.getMinutes())}.txt`;
+}
+
+return { get encodeSave() { return encodeSave; }, get checkSave() { return checkSave; }, get decodeSave() { return decodeSave; }, get exportName() { return exportName; } };
 })();
 
 // ---- src/core/version.js ----
 const __m_src_core_version_js = (() => {
 // 版本号：显示在主菜单里，方便测试的亲友反馈问题时说明版本；网页版的离线缓存也用它区分版本
-const VERSION = '0.11.4';
+const VERSION = '0.11.5';
 
 return { get VERSION() { return VERSION; } };
 })();
@@ -9240,7 +9328,8 @@ const __m_src_ui_menu_js = (() => {
 // 主菜单（DOM 叠加层）：标题画面、暂停菜单、存档槽、新游戏、设置。
 // 菜单只负责界面；真正的读档 / 存档 / 开新局都通过 hooks 交给 main.js。
 const { S, saveSettings, resetSettings } = __m_src_core_settings_js;
-const { listSlots, SLOT_COUNT } = __m_src_core_saves_js;
+const { listSlots, SLOT_COUNT, summarize } = __m_src_core_saves_js;
+const { decodeSave, exportName } = __m_src_core_saveTransfer_js;
 const { VERSION } = __m_src_core_version_js;
 
 const DEFAULT_SEED = 20260213;
@@ -9295,6 +9384,11 @@ const CSS = `
 #sg-menu .seg .btn{min-width:0}
 #sg-menu .seed{display:flex;gap:8px;margin-top:8px;align-items:center}
 #sg-menu .seed input{flex:1;min-width:0;background:rgba(255,255,255,.06);border:1px solid rgba(160,185,255,.22);color:#fff;border-radius:9px;padding:8px 10px;font:inherit;font-size:14px}
+#sg-menu textarea{width:100%;min-height:84px;resize:vertical;background:rgba(255,255,255,.06);border:1px solid rgba(160,185,255,.22);color:#dfe8ff;border-radius:9px;padding:8px 10px;
+  font:12px/1.4 ui-monospace,Menlo,monospace;word-break:break-all;-webkit-user-select:text;user-select:text}
+#sg-menu .filebtn{position:relative;overflow:hidden;display:inline-flex;align-items:center;justify-content:center}
+#sg-menu .filebtn input{position:absolute;inset:0;opacity:0;cursor:pointer}
+#sg-menu .ok{color:#9dffc8}#sg-menu .bad{color:#ffb0bc}
 #sg-menu .note{font-size:12px;color:#8f9cc0;margin-top:6px;line-height:1.5}
 #sg-menu .tabs{display:flex;gap:6px;margin-bottom:14px;overflow-x:auto;scrollbar-width:none}
 #sg-menu .tabs .btn{flex:1 0 auto}
@@ -9415,7 +9509,7 @@ class Menu {
     this.el.addEventListener('input', (e) => this.onInput(e));
     this.el.addEventListener('change', (e) => this.onInput(e));
     // 自定义种子输入框里的按键不要传给游戏
-    this.el.addEventListener('keydown', (e) => { if (e.target.tagName === 'INPUT' && e.target.type === 'text') e.stopPropagation(); });
+    this.el.addEventListener('keydown', (e) => { if ((e.target.tagName === 'INPUT' && e.target.type === 'text') || e.target.tagName === 'TEXTAREA') e.stopPropagation(); });
   }
 
   get isOpen() { return this.el.classList.contains('open'); }
@@ -9444,6 +9538,7 @@ class Menu {
     if (!this.isOpen) return;
     if (this.screen === 'pause') { this.h.resume(); return; }
     if (this.screen === 'title') return;
+    if (this.screen === 'export' || this.screen === 'import') { this.show('slots'); return; }
     this.show(this.root);
   }
 
@@ -9471,7 +9566,11 @@ class Menu {
     else if (s === 'settings') h = this.settingsHtml();
     else if (s === 'install') h = this.installHtml();
     else if (s === 'miles') h = this.milesHtml();
+    else if (s === 'export') h = this.exportHtml();
+    else if (s === 'import') h = this.importHtml();
+    const ta = document.activeElement && document.activeElement.dataset && document.activeElement.dataset.act === 'impcode';
     this.el.innerHTML = h;
+    if (ta) { const t = this.el.querySelector('[data-act=impcode]'); if (t) { t.focus({ preventScroll: true }); t.setSelectionRange(t.value.length, t.value.length); } }
     if (s === 'settings' && this.tab === 'feel') this.h.fillTuning(this.el.querySelector('.tune'));
   }
 
@@ -9487,7 +9586,7 @@ class Menu {
       <div class="items">
       ${L ? `<button class="mi primary" data-act="continue" data-n="${L.n}">继续游戏<small>存档 ${L.n} · ${esc(slotLine(L))} · ${fmtWhen(L.savedAt)}</small></button>` : ''}
       <button class="mi ${L ? '' : 'primary'}" data-act="go" data-to="new">新游戏<small>${L ? '选一个存档槽开始新的星域' : '从一片陌生的星域开始'}</small></button>
-      <button class="mi" data-act="go" data-to="slots" ${any ? '' : 'disabled'}>读取存档<small>${any ? '读取、删除存档' : '还没有存档'}</small></button>
+      <button class="mi" data-act="go" data-to="slots">读取存档<small>${any ? '读取、导出、导入、删除存档' : '还没有存档 · 可以导入别的设备上的存档'}</small></button>
       <button class="mi" data-act="go" data-to="settings">设置<small>声音 · 手感 · 画面和界面 · 操作说明</small></button>
       ${this.milesBtn()}
       ${this.installBtn()}
@@ -9537,7 +9636,7 @@ class Menu {
       <h2>添加到主屏幕</h2>
       <div class="lead">装好后从图标打开：全屏、没有浏览器的地址栏，断网也能玩</div>
       <div class="card"><ol style="margin:0;padding-left:20px;line-height:1.7;font-size:14px;color:#dfe8ff">${steps.map((x) => `<li style="margin:6px 0">${x}</li>`).join('')}</ol></div>
-      <div class="note" style="margin-top:12px">存档保存在各自的浏览器里：从主屏幕图标打开和在浏览器里打开是两份存档，换手机或换浏览器存档也不会跟过去。</div>
+      <div class="note" style="margin-top:12px">存档保存在各自的浏览器里：从主屏幕图标打开和在浏览器里打开是两份存档，换手机或换浏览器存档也不会自动跟过去。要搬存档，用「读取存档」里的「导出」和「导入存档」。</div>
     </div>`;
   }
 
@@ -9549,7 +9648,7 @@ class Menu {
       <div class="items">
       <button class="mi primary" data-act="resume">继续游戏<small>${this.h.isTouch() ? '' : 'Esc'}</small></button>
       <button class="mi" data-act="save">保存<small>${n ? `立即保存到存档 ${n}（平时每隔几秒也会自动保存）` : '选一个存档槽保存'}</small></button>
-      <button class="mi" data-act="go" data-to="slots">存档管理<small>读取、另存到别的槽、删除</small></button>
+      <button class="mi" data-act="go" data-to="slots">存档管理<small>读取、另存到别的槽、导出 / 导入、删除</small></button>
       <button class="mi" data-act="go" data-to="new">开始新存档<small>当前进度会先保存好</small></button>
       <button class="mi" data-act="go" data-to="settings">设置<small>声音 · 手感 · 画面和界面 · 操作说明</small></button>
       ${this.milesBtn()}
@@ -9580,6 +9679,7 @@ class Menu {
           : `<button class="btn" data-act="saveto" data-n="${s.n}">${s.empty ? '保存到这里' : '覆盖保存到这里'}</button>`;
       }
       if (isCur) a += `<button class="btn" data-act="save">立即保存</button>`;
+      if (!s.empty) a += `<button class="btn" data-act="export" data-n="${s.n}">导出</button>`;
       if (!s.empty && !isCur) {
         a += this.confirm === `del:${s.n}`
           ? `<button class="btn warn" data-act="del" data-n="${s.n}">确定删除？删除后不能恢复</button>`
@@ -9591,7 +9691,60 @@ class Menu {
       <h2>${inGame ? '存档管理' : '读取存档'}</h2>
       ${this.notice ? `<div class="lead" style="color:#9dffc8">${this.notice}</div>` : ''}
       <div class="lead">${inGame ? '读取别的存档前，当前进度会先保存好。「保存到这里」会把当前进度复制到那个槽位，之后自动保存到那里。' : `共 ${SLOT_COUNT} 个存档槽，正在玩的存档会自动保存`}</div>
-      ${cards}</div>`;
+      ${cards}
+      <button class="mi" data-act="go" data-to="import">导入存档<small>把另一台设备上导出的存档码或文件放进一个存档槽</small></button></div>`;
+  }
+
+  // ---------- 导出 / 导入（在 iPhone 和电脑之间搬存档） ----------
+  exportHtml() {
+    const x = this.exp || {};
+    const s = listSlots()[x.n - 1];
+    const canShare = !!(x.file && navigator.canShare && navigator.canShare({ files: [x.file] }));
+    let body;
+    if (x.err) body = `<div class="lead bad">${esc(x.err)}</div>`;
+    else if (!x.code) body = '<div class="lead">正在生成存档码…</div>';
+    else {
+      body = `<div class="acts">
+          <button class="btn go" data-act="copycode">复制存档码</button>
+          <button class="btn" data-act="sharefile">${canShare ? '分享文件（隔空投送 / 存到「文件」）' : '下载存档文件'}</button></div>
+        <div class="note">存档码约 ${Math.max(1, Math.round(x.code.length / 1024))} KB。也可以长按下面的框全选复制：</div>
+        <textarea readonly data-act="codebox">${esc(x.code)}</textarea>
+        <div class="note">在另一台设备上：主菜单 →「读取存档」→「导入存档」，粘贴存档码或选择这个文件。导出的是现在这一刻的进度，之后在这边玩的不会跟过去。</div>`;
+    }
+    return `<div class="box wide">${this.backBtn()}
+      <h2>导出存档 ${x.n}</h2>
+      ${this.notice ? `<div class="lead ok">${esc(this.notice)}</div>` : ''}
+      ${s && !s.empty ? this.slotCard(s, '') : ''}
+      ${body}</div>`;
+  }
+
+  importHtml() {
+    const x = this.imp || (this.imp = { text: '', res: null, slot: null, busy: false });
+    const inGame = this.root === 'pause';
+    const cur = inGame ? this.h.slot() : null;
+    const slots = listSlots();
+    if (x.slot == null || x.slot === cur) x.slot = (slots.find((s) => s.empty && s.n !== cur) || slots.find((s) => s.n !== cur)).n;
+    const r = x.res;
+    let preview = '';
+    if (x.busy) preview = '<div class="note">正在读取…</div>';
+    else if (r && r.ok) {
+      const p = summarize(r.save);
+      preview = `<div class="note ok">读到一份存档${r.slot ? `（原来是存档 ${r.slot}）` : ''}：${esc(seedLabel(p.seed))} · ${esc(slotLine(p))}${p.savedAt ? ` · 保存于 ${fmtWhen(p.savedAt)}` : ''}</div>`;
+    } else if (r && r.msg) preview = `<div class="note bad">${esc(r.msg)}</div>`;
+    const cards = slots.map((s) => (s.n === cur ? '' : this.slotCard(s, '', `pick ${s.n === x.slot ? 'sel' : ''}`))).join('');
+    const target = slots[x.slot - 1];
+    const ok = !!(r && r.ok);
+    const label = !target.empty && this.confirm === `import:${x.slot}` ? `确定覆盖存档 ${x.slot}？原来的进度会丢掉` : `导入到存档 ${x.slot}${target.empty ? '' : '（覆盖）'}`;
+    return `<div class="box wide">${this.backBtn()}
+      <h2>导入存档</h2>
+      ${this.notice ? `<div class="lead bad">${esc(this.notice)}</div>` : '<div class="lead">把另一台设备上「导出」得到的存档码粘贴到下面，或者选择导出的文件</div>'}
+      <textarea data-act="impcode" placeholder="把存档码粘贴到这里（SG2Z:…）">${esc(x.text)}</textarea>
+      <div class="acts"><button class="btn" data-act="pastecode">从剪贴板粘贴</button><span class="btn filebtn">选择存档文件<input type="file" accept=".txt,text/plain,.json,application/json" data-act="impfile"></span></div>
+      ${preview}
+      <div class="grp">放到哪个存档槽</div>
+      ${cards}
+      ${inGame && cur ? `<div class="note">正在玩的存档 ${cur} 不能被覆盖。想替换它，先回到标题画面再导入。</div>` : ''}
+      <button class="mi primary" data-act="doimport" ${ok ? '' : 'disabled'}>${label}</button></div>`;
   }
 
   newHtml() {
@@ -9661,9 +9814,73 @@ class Menu {
     this.render();
   }
 
+  // 解析导入的内容（粘贴时稍等一下再解析，避免每敲一个字就重画）
+  readImport(text, now) {
+    const x = this.imp || (this.imp = { text: '', res: null, slot: null });
+    x.text = text;
+    this.confirm = null; this.notice = null;
+    clearTimeout(this.impT);
+    const run = () => {
+      const want = x.text;
+      x.busy = true;
+      decodeSave(want).then((res) => { if (x.text !== want) return; x.busy = false; x.res = res; if (this.screen === 'import') this.render(); });
+    };
+    if (now) { run(); this.render(); } else this.impT = setTimeout(run, 250);
+  }
+
+  startExport(n) {
+    this.exp = { n, code: null, file: null, err: null };
+    this.show('export');
+    this.h.exportSlot(n).then((code) => {
+      const x = this.exp;
+      if (!x || x.n !== n) return;
+      x.code = code;
+      try { x.file = new File([code], exportName(n), { type: 'text/plain' }); } catch (e) { x.file = null; }
+      if (this.screen === 'export') this.render();
+    }, (err) => { if (this.exp && this.exp.n === n) { this.exp.err = (err && err.message) || '导出失败'; this.render(); } });
+  }
+
+  copyCode() {
+    const code = this.exp && this.exp.code;
+    if (!code) return;
+    const done = (ok) => { this.notice = ok ? '已复制。到另一台设备上「导入存档」粘贴就行' : '没能自动复制：长按下面的框，全选后复制'; this.render(); };
+    const fallback = () => {
+      const t = this.el.querySelector('[data-act=codebox]');
+      if (!t) return done(false);
+      t.focus(); t.select(); t.setSelectionRange(0, code.length);
+      let ok = false;
+      try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+      done(ok);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(code).then(() => done(true), fallback);
+    else fallback();
+  }
+
+  shareFile() {
+    const x = this.exp;
+    if (!x || !x.code) return;
+    if (x.file && navigator.canShare && navigator.canShare({ files: [x.file] })) {
+      navigator.share({ files: [x.file], title: 'Space Garden 存档' }).catch(() => {});
+      return;
+    }
+    const url = URL.createObjectURL(new Blob([x.code], { type: 'text/plain' }));
+    const a = document.createElement('a');
+    a.href = url; a.download = exportName(x.n);
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    this.notice = `已下载 ${exportName(x.n)}`;
+    this.render();
+  }
+
   // ---------- 交互 ----------
   onInput(e) {
     const t = e.target;
+    if (t.dataset.act === 'impcode') { if (e.type === 'input') this.readImport(t.value, false); return; }
+    if (t.dataset.act === 'impfile') {
+      if (e.type !== 'change' || !t.files || !t.files[0]) return;
+      t.files[0].text().then((txt) => this.readImport(txt, true), () => { this.notice = '读不出这个文件'; this.render(); });
+      return;
+    }
     if (t.dataset.act === 'seedtext') { this.customSeed = t.value.replace(/[^\d]/g, '').slice(0, 10); if (t.value !== this.customSeed) t.value = this.customSeed; return; }
     const k = t.dataset.set;
     if (!k) return;
@@ -9682,7 +9899,10 @@ class Menu {
   onClick(e) {
     // 新游戏页：点卡片选槽位
     const card = e.target.closest('.slot.pick');
-    if (card) { this.newSlot = +card.dataset.slot; this.confirm = null; this.render(); return; }
+    if (card) {
+      if (this.screen === 'import') this.imp.slot = +card.dataset.slot; else this.newSlot = +card.dataset.slot;
+      this.confirm = null; this.render(); return;
+    }
     const b = e.target.closest('[data-act]');
     if (!b || b.tagName === 'INPUT') return;
     const act = b.dataset.act, n = +b.dataset.n;
@@ -9712,6 +9932,27 @@ class Menu {
         break;
       }
       case 'tab': this.tab = b.dataset.v; this.render(); break;
+      case 'export': this.startExport(n); break;
+      case 'copycode': this.copyCode(); break;
+      case 'sharefile': this.shareFile(); break;
+      case 'pastecode':
+        if (navigator.clipboard && navigator.clipboard.readText) navigator.clipboard.readText().then((t) => this.readImport(t, true), () => { this.notice = '没能读剪贴板：长按上面的框粘贴'; this.render(); });
+        else { this.notice = '这个浏览器不能直接读剪贴板：长按上面的框粘贴'; this.render(); }
+        break;
+      case 'doimport': {
+        const x = this.imp;
+        if (!x || !x.res || !x.res.ok) break;
+        const tgt = listSlots()[x.slot - 1];
+        if (!tgt.empty && !twoStep(`import:${x.slot}`)) break;
+        const ok = this.h.importTo(x.slot, x.res.save);
+        const n2 = x.slot;
+        if (!ok) { this.notice = '导入失败：浏览器的存储空间不够或不可用'; this.render(); break; }
+        this.imp = null;
+        this.show('slots');
+        this.notice = `已导入到存档 ${n2}：点「读取」就能接着玩`;
+        this.render();
+        break;
+      }
       case 'opt': {
         const k = b.dataset.k;
         S[k] = typeof S[k] === 'number' ? +b.dataset.v : b.dataset.v;
@@ -9801,7 +10042,8 @@ const { TouchControls } = __m_src_ui_touch_js;
 const { Audio } = __m_src_audio_audio_js;
 const { Menu } = __m_src_ui_menu_js;
 const { S, loadSettings, saveSettings } = __m_src_core_settings_js;
-const { readSlot, writeSlot, deleteSlot, currentSlot, setCurrentSlot, latestSlot, migrateLegacy } = __m_src_core_saves_js;
+const { readSlot, writeSlot, deleteSlot, currentSlot, setCurrentSlot, latestSlot, migrateLegacy, SAVE_VERSION } = __m_src_core_saves_js;
+const { encodeSave } = __m_src_core_saveTransfer_js;
 const { nebulaColors } = __m_src_render_nebula_js;
 const { sizeLabel } = __m_src_world_types_js;
 const { clamp, rgbToCss, mixRgb, wrapAngle, smoothstep } = __m_src_core_math_js;
@@ -10215,7 +10457,7 @@ function snapshot() {
       : { x: world.spawn.x, y: world.spawn.y, vx: 0, vy: 0, angle: -Math.PI / 2, ground: null, theta: 0, fuel: tow.fuel })
     : { x: player.x, y: player.y, vx: player.vx, vy: player.vy, angle: player.angle, ground: player.ground ? player.ground.base.id : null, theta: player.theta, fuel: player.fuel };
   return {
-    v: 12, gen: world.gen, seed: world.seed, world: world.serialize(), eco: eco.serialize(), tut: tutorial.serialize(),
+    v: SAVE_VERSION, gen: world.gen, seed: world.seed, world: world.serialize(), eco: eco.serialize(), tut: tutorial.serialize(),
     ...pl,
     // 菜单里显示的概要
     meta: { savedAt: Date.now(), playTime: eco.time, colonies: eco.colonies.size, pop: Math.floor(t.pop), bloomed: world.bloomedCount, won: eco.won },
@@ -10900,6 +11142,18 @@ const menu = new Menu({
   slot: () => slot,
   hasGame: () => state !== 'title',
   resume: () => { if (state === 'pause') startPlay(); },
+  // 导出 / 导入（v0.11.4+）：正在玩的槽位先保存，导出的是这一刻的进度
+  exportSlot: (n) => {
+    if (n === slot) writeSave();
+    const sv = readSlot(n);
+    return sv ? encodeSave(sv, n) : Promise.reject(new Error('这个存档槽是空的'));
+  },
+  importTo: (n, save) => {
+    if (state !== 'title' && n === slot) return false;   // 正在玩的槽位不能被覆盖（自动保存会马上写回去）
+    const ok = writeSlot(n, save);
+    if (ok && state === 'title' && n === slot) setupGame(readSlot(n));   // 标题画面背景就是这个槽：换成导入的
+    return ok;
+  },
   load: (n) => {
     // 标题画面背景里已经是这个存档了：直接进入
     if (state === 'title' && n === slot && world) { startPlay(); return; }
