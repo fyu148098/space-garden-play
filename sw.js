@@ -1,5 +1,5 @@
 // Space Garden 网页版的离线缓存（build.mjs 自动生成）
-const CACHE = 'space-garden-0.11.5-6ab36fcc';
+const CACHE = 'space-garden-0.12.0-5277c8cc';
 const FILES = ["./","index.html","manifest.webmanifest","icons/apple-touch-icon.png","icons/favicon-32.png","icons/icon-192.png","icons/icon-512.png","icons/icon-maskable-512.png"];
 self.addEventListener('install', (e) => { e.waitUntil(caches.open(CACHE).then((c) => c.addAll(FILES)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', (e) => {

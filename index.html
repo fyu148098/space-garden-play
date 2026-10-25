@@ -653,7 +653,8 @@ const BUILDINGS = {
     ],
   },
   port: {
-    name: '贸易站', desc: '派货船在殖民地之间运货（定居点及以上，每个殖民地一座）', bonus: null, minLevel: 2, unique: true,
+    name: '贸易站', desc: '派货船在殖民地之间运货（定居点及以上；每个殖民地一座，城市及以上可以建两座）', bonus: null, minLevel: 2,
+    limit: [0, 1, 1, 1, 2, 2],   // v0.12：每个殖民地最多几座（按殖民地等级）；城市及以上 2 座，航线名额相加、航程取较远的
     levels: [
       { cost: { minerals: 60, stardust: 10 }, routes: 1, cargo: 20, range: 5000, use: { energy: 0.1 }, workers: 1 },
       { cost: { minerals: 90, energy: 30, stardust: 15 }, routes: 2, cargo: 35, range: 8000, use: { energy: 0.15 }, workers: 1 },
@@ -670,7 +671,36 @@ const BUILDINGS = {
       { cost: { minerals: 120, energy: 50, stardust: 65, magma: 15 }, cap: 3, hatch: 20, use: { energy: 0.2 }, workers: 2 },
     ],
   },
+  // v0.12 恒星工业区（Feng 定，见 docs/reviews/2026-10-24-star-industry.md）：只能建在恒星 3000 以内的殖民地，每个殖民地每种一座，一颗恒星只有一个工业区；
+  // 每座 5 人、满员才算在工作；三座都在工作、三种原料都够，整套才运转（见 INDUSTRY）。只有一个等级；没有建筑耗电（不走缺电停工）
+  siphon: {
+    name: '恒星汲能站', desc: '恒星工业区：消耗氦，汲取恒星的能量供给信号放大站；整套运转时还有富余能量', bonus: null, unique: true, industry: 'helium',
+    levels: [{ cost: { minerals: 200, energy: 40, stardust: 20, helium: 20 }, workers: 5 }],
+  },
+  amplifier: {
+    name: '信号放大站', desc: '恒星工业区：消耗熔核，把恒星的能量变成信号', bonus: null, unique: true, industry: 'magma',
+    levels: [{ cost: { minerals: 200, energy: 40, stardust: 20, magma: 20 }, workers: 5 }],
+  },
+  cooler: {
+    name: '冷却站', desc: '恒星工业区：消耗冰晶给放大站降温；附带大容量储能', bonus: null, unique: true, industry: 'cryo',
+    levels: [{ cost: { minerals: 200, energy: 40, stardust: 20, cryo: 20 }, cap: { energy: 600, minerals: 0, food: 0 }, workers: 5 }],
+  },
 };
+const INDUSTRY_TYPES = ['siphon', 'amplifier', 'cooler'];
+// v0.12 恒星工业区的运转（设计稿第 3 节）。use = 黄矮星每秒消耗；surplus = 整套运转时每秒富余能量；
+// star = 恒星类型系数 [富余能量, 氦, 冰晶]（熔核不随类型变化）；complete = 第一次连续运转多少秒算完成；light = 运转时的有效亮度等级（大都市）
+const INDUSTRY = {
+  range: 3000,   // 殖民地表面到恒星表面的距离（环面最短）
+  use: { helium: 0.1, magma: 0.1, cryo: 0.1 },
+  surplus: 2,
+  star: { red: [0.6, 0.8, 0.5], orange: [0.8, 0.9, 0.75], yellow: [1, 1, 1], white: [1.3, 1.1, 1.4], blue: [1.8, 1.2, 2.0] },
+  complete: 30,
+  light: 5,
+};
+// v0.12 自动开拓（设计稿 4.2，第一套工业区完成后解锁）：城市及以上是据点，每 every 秒试一次，派 1 名开拓者 + 少量物资；
+// 先给自己建的前哨补 follow 名后续开拓者，再去 range 以内（表面距离）新开拓；小船按货船的速度、血量飞，可以被无人机打掉；
+// 没唤醒的星原地唤醒 bloom 秒
+const PIONEER = { every: 180, cargo: { food: 10, energy: 10, minerals: 20 }, follow: 3, range: 4000, speed: 260, hp: 60, bloom: 20, minLevel: 4 };
 // 气态巨行星上的精灵巢（v0.9.5，Feng 选定）：容量 5 / 8 / 12，孵得更快；费用、工人、耗能和普通星球一样
 const NEST_GAS = { cap: [0, 5, 8, 12], hatch: [0, 27, 20, 13] };   // 下标 = 巢的等级
 // 精灵强度跟着它所属的巢的等级（v0.9.5 取代飞船升级「精灵共鸣」）
@@ -678,7 +708,7 @@ const NEST_POWER = [0, 1, 1.15, 1.4];   // 下标 = 巢的等级；巢没了 / �
 // 殖民地核心防御炮（v0.9.5）：没失守、核心有人（coreWorkers ≥ 1）就自带。
 // 射程 = 殖民地引力场外 SPRITE.guardRange（和驻守精灵一样）；只打无人机，也不会被打（无人机只打精灵）
 const CORE_GUN = { dps: 5 };   // 每秒 5 点（已经算上无人机的护甲）
-const BUILD_ORDER = ['miner', 'power', 'farm', 'housing', 'storage', 'greenhouse', 'port', 'nest'];
+const BUILD_ORDER = ['miner', 'power', 'farm', 'housing', 'storage', 'greenhouse', 'port', 'nest', 'siphon', 'amplifier', 'cooler'];
 
 // 星球类型特产：鼓励在不同类型的星球上殖民
 // farm = 农业系数：只有类地星球种得好，工业 / 能源星球需要别处供粮（贸易）。
@@ -872,7 +902,9 @@ const RAID = {
   groupByLevel: [0, 1, 1, 2, 3, 4],        // 一支袭击的目标规模（被吸引时召集 2000 以内游荡的同伴）：前哨站 1、定居点 1、城镇 2、城市 3、大都市 4
   patrolChance: 0.06, patrolExtra: [1, 2], // 6% 的概率多 1–2 架；刷游荡的无人机时 6% 的概率一次刷 2–3 架
 };
-function raidAttract(c) { return c.planet.R + RAID.attract0 + RAID.attractPerLevel * c.level; }
+// v0.12：灯光、吸引、袭击规模都按「有效亮度等级」：恒星工业区运转时按大都市（INDUSTRY.light），否则是殖民地本来的等级
+function lightLevel(c) { return c.lightLevel != null ? c.lightLevel : c.level; }
+function raidAttract(c) { return c.planet.R + RAID.attract0 + RAID.attractPerLevel * lightLevel(c); }
 
 // 终局目标：跃迁信标
 // v0.10：要三种特产。⚠ 计划是冰晶 80、熔核 60、氦 60、星尘 200：经济模拟里一直扩张约 62 分钟就点亮（目标 90–120），
@@ -892,7 +924,7 @@ const SPRITE_FOOD = 0.015;
 // 巢暂停、缺人、缺电停工、被拆都照扣；出生巢所在的殖民地失守时不扣。模拟 EH10：20 局失守 8 次（不耗电 6 次），0.2 时 15 次——不要超过 0.1
 const SPRITE_ENERGY = 0.1;
 
-return { get RES_ZH() { return RES_ZH; }, get SPECIAL() { return SPECIAL; }, get SPECIAL_KEYS() { return SPECIAL_KEYS; }, get RES_COLOR() { return RES_COLOR; }, get SPECIAL_SRC() { return SPECIAL_SRC; }, get SPECIAL_PROD() { return SPECIAL_PROD; }, get SPECIAL_CAP() { return SPECIAL_CAP; }, get RICHNESS() { return RICHNESS; }, get ROLE_KEY() { return ROLE_KEY; }, get ROLE_ZH() { return ROLE_ZH; }, get SCAN() { return SCAN; }, get FINDS() { return FINDS; }, get LEVELS() { return LEVELS; }, get MAX_LEVEL_BY_R() { return MAX_LEVEL_BY_R; }, get maxLevelFor() { return maxLevelFor; }, get sizeClass() { return sizeClass; }, get CORE_WORKERS() { return CORE_WORKERS; }, get POP_FOOD() { return POP_FOOD; }, get STARVE() { return STARVE; }, get CLUSTER() { return CLUSTER; }, get POP_GROWTH_TIME() { return POP_GROWTH_TIME; }, get START_POD() { return START_POD; }, get START() { return START; }, get POD() { return POD; }, get podStardust() { return podStardust; }, get MIGRATION() { return MIGRATION; }, get DEMOLISH_REFUND() { return DEMOLISH_REFUND; }, get BUILDINGS() { return BUILDINGS; }, get NEST_GAS() { return NEST_GAS; }, get NEST_POWER() { return NEST_POWER; }, get CORE_GUN() { return CORE_GUN; }, get BUILD_ORDER() { return BUILD_ORDER; }, get TYPE_BONUS() { return TYPE_BONUS; }, get STARDUST() { return STARDUST; }, get SHIP_BASE() { return SHIP_BASE; }, get SHIP_UPGRADES() { return SHIP_UPGRADES; }, get SHIPYARD_LEVEL() { return SHIPYARD_LEVEL; }, get LOW_POWER() { return LOW_POWER; }, get WRECK() { return WRECK; }, get TRADE() { return TRADE; }, get FALL() { return FALL; }, get SPAWN() { return SPAWN; }, get SPRITE() { return SPRITE; }, get HATCH_COST() { return HATCH_COST; }, get SHIP_GUN() { return SHIP_GUN; }, get START_ZONE() { return START_ZONE; }, get RICH_GUARD() { return RICH_GUARD; }, get CRYSTAL() { return CRYSTAL; }, get DRONE() { return DRONE; }, get DRONE_POP() { return DRONE_POP; }, get MAP_DRONES() { return MAP_DRONES; }, get EDGE_DRONES() { return EDGE_DRONES; }, get RAID() { return RAID; }, get raidAttract() { return raidAttract; }, get WARP() { return WARP; }, get DEPLOY() { return DEPLOY; }, get SHIP_CHARGE() { return SHIP_CHARGE; }, get SPRITE_FOOD() { return SPRITE_FOOD; }, get SPRITE_ENERGY() { return SPRITE_ENERGY; } };
+return { get RES_ZH() { return RES_ZH; }, get SPECIAL() { return SPECIAL; }, get SPECIAL_KEYS() { return SPECIAL_KEYS; }, get RES_COLOR() { return RES_COLOR; }, get SPECIAL_SRC() { return SPECIAL_SRC; }, get SPECIAL_PROD() { return SPECIAL_PROD; }, get SPECIAL_CAP() { return SPECIAL_CAP; }, get RICHNESS() { return RICHNESS; }, get ROLE_KEY() { return ROLE_KEY; }, get ROLE_ZH() { return ROLE_ZH; }, get SCAN() { return SCAN; }, get FINDS() { return FINDS; }, get LEVELS() { return LEVELS; }, get MAX_LEVEL_BY_R() { return MAX_LEVEL_BY_R; }, get maxLevelFor() { return maxLevelFor; }, get sizeClass() { return sizeClass; }, get CORE_WORKERS() { return CORE_WORKERS; }, get POP_FOOD() { return POP_FOOD; }, get STARVE() { return STARVE; }, get CLUSTER() { return CLUSTER; }, get POP_GROWTH_TIME() { return POP_GROWTH_TIME; }, get START_POD() { return START_POD; }, get START() { return START; }, get POD() { return POD; }, get podStardust() { return podStardust; }, get MIGRATION() { return MIGRATION; }, get DEMOLISH_REFUND() { return DEMOLISH_REFUND; }, get BUILDINGS() { return BUILDINGS; }, get INDUSTRY_TYPES() { return INDUSTRY_TYPES; }, get INDUSTRY() { return INDUSTRY; }, get PIONEER() { return PIONEER; }, get NEST_GAS() { return NEST_GAS; }, get NEST_POWER() { return NEST_POWER; }, get CORE_GUN() { return CORE_GUN; }, get BUILD_ORDER() { return BUILD_ORDER; }, get TYPE_BONUS() { return TYPE_BONUS; }, get STARDUST() { return STARDUST; }, get SHIP_BASE() { return SHIP_BASE; }, get SHIP_UPGRADES() { return SHIP_UPGRADES; }, get SHIPYARD_LEVEL() { return SHIPYARD_LEVEL; }, get LOW_POWER() { return LOW_POWER; }, get WRECK() { return WRECK; }, get TRADE() { return TRADE; }, get FALL() { return FALL; }, get SPAWN() { return SPAWN; }, get SPRITE() { return SPRITE; }, get HATCH_COST() { return HATCH_COST; }, get SHIP_GUN() { return SHIP_GUN; }, get START_ZONE() { return START_ZONE; }, get RICH_GUARD() { return RICH_GUARD; }, get CRYSTAL() { return CRYSTAL; }, get DRONE() { return DRONE; }, get DRONE_POP() { return DRONE_POP; }, get MAP_DRONES() { return MAP_DRONES; }, get EDGE_DRONES() { return EDGE_DRONES; }, get RAID() { return RAID; }, get lightLevel() { return lightLevel; }, get raidAttract() { return raidAttract; }, get WARP() { return WARP; }, get DEPLOY() { return DEPLOY; }, get SHIP_CHARGE() { return SHIP_CHARGE; }, get SPRITE_FOOD() { return SPRITE_FOOD; }, get SPRITE_ENERGY() { return SPRITE_ENERGY; } };
 })();
 
 // ---- src/world/survey.js ----
@@ -1513,7 +1545,7 @@ const __m_src_world_spawner_js = (() => {
 //     （飞船周围的环 / 某个殖民地的吸引环 / 星域里随便哪个暗处）。它们在整个星域里游荡，会被殖民地的灯光引过去，
 //     一旦进了殖民地的照明范围就被吸引、召集附近的同伴去袭击（见 entities/garden.js）。不随游戏时间变难。
 //   还没唤醒的枯萎星球，死掉的收割者会慢慢长回来（像刷怪笼），唤醒之后就不会了
-const { SPAWN, RAID, DRONE, MAP_DRONES, DRONE_POP, raidAttract } = __m_src_econ_config_js;
+const { SPAWN, RAID, DRONE, MAP_DRONES, DRONE_POP, raidAttract, lightLevel } = __m_src_econ_config_js;
 const { mod, wrapDelta } = __m_src_world_world_js;
 const { fieldOf } = __m_src_config_tuning_js;
 
@@ -1522,7 +1554,7 @@ const TAU = Math.PI * 2;
 // 殖民地的照明半径（从星球中心算）
 function colonyLight(c) {
   const p = c.planet;
-  let r = p.R * SPAWN.planetLightR + SPAWN.planetLight + SPAWN.colonyLightPerLevel * c.level;
+  let r = p.R * SPAWN.planetLightR + SPAWN.planetLight + SPAWN.colonyLightPerLevel * lightLevel(c);   // v0.12：工业区运转时按大都市
   if (c.garrisonN > 0) r += SPAWN.garrisonLight;
   return r;
 }
@@ -1661,7 +1693,7 @@ class Spawner {
         if (p && !(eco && this.inAttract(world, eco, p[0], p[1]))) at = p;
       }
     } else if (u < wShip + wCol && eco) {
-      const cols = [...eco.colonies.values()].filter((c) => !c.fallen && c.level >= DRONE.pullMinLevel);
+      const cols = [...eco.colonies.values()].filter((c) => !c.fallen && lightLevel(c) >= DRONE.pullMinLevel);
       if (cols.length) {
         const c = cols[Math.floor(this.rand() * cols.length)];
         const r0 = colonyLight(c) + 100, r1 = raidAttract(c);
@@ -1728,7 +1760,7 @@ const { TAU, clamp } = __m_src_core_math_js;
 const { RAID, SPRITE, DRONE, CRYSTAL, SHIP_GUN, LOW_POWER, SCAN, RES_COLOR } = __m_src_econ_config_js;
 const { fightStep } = __m_src_econ_combat_js;
 const { colonyLight } = __m_src_world_spawner_js;
-const { raidAttract } = __m_src_econ_config_js;
+const { raidAttract, lightLevel, PIONEER } = __m_src_econ_config_js;
 const { mod, wrapDelta } = __m_src_world_world_js;
 const { fieldOf } = __m_src_config_tuning_js;
 
@@ -1835,7 +1867,7 @@ class Garden {
   pickWaypoint(d, world, eco) {
     let pc = null, pd = Infinity;
     if (eco) for (const c of eco.colonies.values()) {
-      if (c.fallen || c.level < DRONE.pullMinLevel) continue;
+      if (c.fallen || lightLevel(c) < DRONE.pullMinLevel) continue;
       const dd = Math.hypot(wrapDelta(c.planet.x - d.x, world.W), wrapDelta(c.planet.y - d.y, world.H));
       if (dd < raidAttract(c) && dd < pd) { pd = dd; pc = c; }
     }
@@ -1865,7 +1897,7 @@ class Garden {
     const alert = (x) => { x.mode = 'alert'; x.alertT = DRONE.alert; x.raidTarget = c.pid; x.wp = null; x.wait = 0; };
     alert(d);
     if (active) return;
-    let n = RAID.groupByLevel[c.level] || 1;
+    let n = RAID.groupByLevel[lightLevel(c)] || 1;   // v0.12：工业区运转时按大都市
     if (this.rand() < RAID.patrolChance) n += RAID.patrolExtra[0] + Math.floor(this.rand() * (RAID.patrolExtra[1] - RAID.patrolExtra[0] + 1));
     const near = [];
     for (const x of world.drones) {
@@ -1964,6 +1996,7 @@ class Garden {
     if (eco) for (const r of eco.trade.routes) if (eco.trade.flying(r)) { const q = eco.trade.pos(r); if (q) ships.push({ r, x: q.x, y: q.y, manager: eco.trade }); }
 
     if (eco) for (const r of eco.transfers.active()) if (!r.ride && eco.transfers.exposed(r)) ships.push({ r, x: r.x, y: r.y, manager: eco.transfers });
+    if (eco && eco.pioneers) for (const s of eco.pioneers.list) ships.push({ r: s, x: s.x, y: s.y, manager: eco.pioneers });   // v0.12 开拓者小船：同货船的规则被追打
 
     // ---- 无人机（v0.9.4）：wander 游荡 / chase 追飞船（会放弃）/ alert 被灯光吸引 / raid 飞向殖民地 / attack 围攻 ----
     this.newChase = false;   // 这一帧有无人机开始追飞船（新手说明卡用）
@@ -2008,7 +2041,7 @@ class Garden {
       if (mode === 'wander' || mode === 'raid') {
         let sd = FREIGHTER_AGGRO;
         for (const f of ships) {
-          if (f.manager === eco.transfers ? !eco.transfers.exposed(f.r) : !eco.trade.flying(f.r)) continue;
+          if (f.manager === eco.transfers ? !eco.transfers.exposed(f.r) : !f.manager.flying(f.r)) continue;
           const fd = Math.hypot(wrapDelta(f.x - d.x, world.W), wrapDelta(f.y - d.y, world.H));
           if (fd < sd) { sd = fd; ship = f; }
         }
@@ -2378,6 +2411,22 @@ class Garden {
   // 货船：扁平小货船，货舱颜色 = 运的货
   drawFreighters(ctx, world, eco, cam, time) {
     if (!eco) return;
+    // v0.12 开拓者小船：浅绿色，带「开拓者」字样；唤醒星球时绕着星球画进度
+    if (eco.pioneers) for (const s of eco.pioneers.list) {
+      const q = world.nearest(s, cam.x, cam.y);
+      if (Math.hypot(q.x - cam.x, q.y - cam.y) > cam.viewRadius + 100) continue;
+      ctx.save(); ctx.translate(q.x, q.y); ctx.rotate(Math.atan2(s.uy || 0, s.ux || 1) + (s.state === 'back' ? 0 : 0));
+      const hurt = s.under > 0 && Math.sin(time * 40) > 0;
+      ctx.fillStyle = '#ffb347';
+      ctx.beginPath(); ctx.moveTo(-8, -2.5); ctx.lineTo(-13 - Math.sin(time * 30 + s.id) * 2, 0); ctx.lineTo(-8, 2.5); ctx.fill();
+      ctx.fillStyle = hurt ? '#ff7a8a' : '#9dffc8';
+      ctx.beginPath(); ctx.moveTo(11, 0); ctx.lineTo(-8, -6); ctx.lineTo(-5, 0); ctx.lineTo(-8, 6); ctx.closePath(); ctx.fill();
+      ctx.restore();
+      ctx.font = '12px sans-serif'; ctx.textAlign = 'center'; ctx.fillStyle = '#9dffc8';
+      ctx.fillText(s.state === 'bloom' ? `开拓者 · 唤醒中 ${Math.floor((s.bloomT / PIONEER.bloom) * 100)}%` : s.state === 'back' ? '开拓者 · 返回' : '开拓者', q.x, q.y - 16);
+      if (s.hp < PIONEER.hp) { ctx.strokeStyle = '#ff4a5e'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(q.x, q.y, 16, -Math.PI / 2, -Math.PI / 2 + (s.hp / PIONEER.hp) * TAU); ctx.stroke(); }
+      s.under = Math.max(0, (s.under || 0) - 0.016);
+    }
     for (const t of eco.transfers.active()) {
       if (t.ride || !eco.transfers.exposed(t)) continue;
       const q = world.nearest(t, cam.x, cam.y);
@@ -2692,7 +2741,7 @@ const __m_src_econ_colony_js = (() => {
 //   - 能量收支为负且库存耗尽时，后建的耗电建筑先停工（带回差，不会来回闪）
 //   - 居民吃食物；同类生产建筑扎堆有产业集群加成
 //   - v0.11.4 精灵供粮：驻地在这里的精灵吃剩下的粮（先养人、再养精灵、最后才长人）；出生巢在这里的精灵每只固定耗电
-const { LEVELS, BUILDINGS, TYPE_BONUS, CORE_WORKERS, POP_FOOD, POP_GROWTH_TIME, STARVE, CLUSTER, FALL, RAID, NEST_GAS, SPECIAL, SPECIAL_KEYS, SPECIAL_PROD, SPECIAL_CAP, RICHNESS, ROLE_KEY, FINDS, maxLevelFor, SPRITE_FOOD, SPRITE_ENERGY } = __m_src_econ_config_js;
+const { LEVELS, BUILDINGS, TYPE_BONUS, CORE_WORKERS, POP_FOOD, POP_GROWTH_TIME, STARVE, CLUSTER, FALL, RAID, NEST_GAS, SPECIAL, SPECIAL_KEYS, SPECIAL_PROD, SPECIAL_CAP, RICHNESS, ROLE_KEY, FINDS, maxLevelFor, SPRITE_FOOD, SPRITE_ENERGY, INDUSTRY, INDUSTRY_TYPES, RES_ZH } = __m_src_econ_config_js;
 
 // 殖民地的库存（v0.10 加了三种特产）
 function emptyStock() { return { energy: 0, minerals: 0, food: 0, cryo: 0, magma: 0, helium: 0 }; }
@@ -2734,10 +2783,45 @@ class Colony {
     this.dig = 0;            // v0.10：挖掘进度（秒）
     this.dug = false;        // v0.10：这颗星的埋藏物资 / 遗迹已经挖完
     this.raidPeak = 0;       // 这次袭击最多有几架无人机在吸能（里程碑「守望」用）
+    this.auto = null;        // v0.12：自动开拓建的前哨 { base: 所属据点 pid, follow: 已收到的后续开拓者数 }
     // v0.11.4 精灵供粮 / 耗电（每帧计算，不存档）：posted = 驻地在这里的精灵数，fed = 供粮比例（0–1），
     // foodNeed = 精灵每秒要吃的粮，owned = 出生巢在这里的活精灵数，energy = 精灵每秒耗电，build = 建筑每秒耗电
     this.upkeep = { posted: 0, fed: 1, foodNeed: 0, owned: 0, energy: 0, build: 0 };
     this.prodFood = 0; this.prodEnergy = 0;   // 本地每秒产量（不扣消耗，显示 / 模拟用）
+    // v0.12 恒星工业区（每帧判定，只存连续运转计时 indT）：indRun = 整套在运转；indWhy = 停转原因；indNeed = 每秒消耗；indSurplus = 每秒富余能量
+    this.indRun = false; this.indT = 0; this.indWhy = ''; this.indNeed = null; this.indSurplus = 0;
+  }
+
+  // v0.12：有效亮度等级（灯光、吸引范围、袭击规模用）：工业区运转时按大都市，否则是殖民地本来的等级
+  get lightLevel() { return this.indRun ? INDUSTRY.light : this.level; }
+  // 这里有没有工业建筑、三座齐不齐
+  industryPlots() { return INDUSTRY_TYPES.map((t) => this.plots.find((b) => b && b.type === t) || null); }
+  get hasIndustry() { return this.plots.some((b) => b && INDUSTRY_TYPES.includes(b.type)); }
+
+  // v0.12 工业链：三座都开着、满员，三种原料够这一帧，整套才运转。运转时扣原料、把富余能量加进产出 P。
+  // dt = 0 的更新（读档刷新等）不改变运转状态
+  industryTick(dt, eco, P) {
+    const bs = this.industryPlots();
+    if (!bs.some(Boolean)) { this.indRun = false; this.indT = 0; this.indWhy = ''; this.indNeed = null; this.indSurplus = 0; return; }
+    const star = eco && eco.industryStar ? eco.industryStar(this) : null;
+    const k = (star && INDUSTRY.star[star.type]) || INDUSTRY.star.yellow;
+    const need = { helium: INDUSTRY.use.helium * k[1], magma: INDUSTRY.use.magma, cryo: INDUSTRY.use.cryo * k[2] };
+    this.indNeed = need;
+    const name = (t) => BUILDINGS[t].name;
+    let why = '';
+    if (!star) why = '不在恒星附近';
+    else if (bs.some((b) => !b)) why = `还没建：${INDUSTRY_TYPES.filter((t, i) => !bs[i]).map(name).join('、')}`;
+    else if (bs.some((b) => !b.on)) why = `暂停：${bs.filter((b) => !b.on).map((b) => name(b.type)).join('、')}`;
+    else if (bs.some((b) => b.workers < this.def(b).workers)) why = `缺人：${bs.filter((b) => b.workers < this.def(b).workers).map((b) => `${name(b.type)} ${b.workers}/${this.def(b).workers}`).join('、')}`;
+    else if (dt > 0) for (const g of ['helium', 'magma', 'cryo']) if ((this.stock[g] || 0) < need[g] * dt) { why = `缺${RES_ZH[g]}`; break; }
+    const run = dt > 0 ? !why : this.indRun && !why;
+    if (run && dt > 0) for (const g in need) this.stock[g] = Math.max(0, this.stock[g] - need[g] * dt);
+    this.indRun = run;
+    this.indWhy = run ? '' : why;
+    this.indSurplus = run ? INDUSTRY.surplus * k[0] : 0;
+    if (run) P.energy += this.indSurplus;
+    if (dt > 0) this.indT = run ? this.indT + dt : 0;
+    for (const b of bs) if (b && b.active && !run) b.status = '停转';
   }
 
   get L() { return LEVELS[this.level]; }
@@ -2828,7 +2912,8 @@ class Colony {
     const list = [];
     this.plots.forEach((b, i) => { if (i > 0 && b && b.on && !b.manual && this.def(b).workers) list.push({ i, b }); });
     const food = this.foodShort, power = this.powerShort;
-    const rank = (b) => (food && b.type === 'farm' ? 0 : power && b.type === 'power' ? 1 : 2);
+    // v0.12：工业建筑排在「缺粮时的农场」之后、其他建筑之前（缺电时的能量站也在它后面）
+    const rank = (b) => (food && b.type === 'farm' ? 0 : INDUSTRY_TYPES.includes(b.type) ? 1 : power && b.type === 'power' ? 2 : 3);
     list.sort((x, y) => rank(x.b) - rank(y.b) || x.b.seq - y.b.seq);
     return out.concat(list);
   }
@@ -2895,6 +2980,7 @@ class Colony {
       for (const k in this.rates) this.rates[k] = 0;
       this.upkeep = { posted: 0, fed: 1, foodNeed: 0, owned: 0, energy: 0, build: 0 };   // 失守：不供粮、不扣精灵耗电
       this.prodFood = 0; this.prodEnergy = 0;
+      this.indRun = false; this.indT = 0; this.indSurplus = 0; this.indWhy = this.hasIndustry ? '失守' : '';   // v0.12：失守的工业区停转、变暗
       this.starving = false;
       this.raidT = this.raidDrain > 0 ? 0 : this.raidT + dt;
       this.raidDrain = 0;
@@ -2933,6 +3019,7 @@ class Colony {
       if (d.use && d.use.energy) { b._u = d.use.energy * e; consumers.push(b); }
       add(b, 1);
     }
+    this.industryTick(dt, eco, P);   // v0.12：放在缺电结算和库存更新之前，富余能量参与当帧的能量收支
 
     // ---- 缺电处理（带回差，避免「停工 → 有电 → 开工 → 又没电」来回闪）----
     // 一旦因缺电停工，建筑会保持「缺电」状态（b.brown），直到满足下面任一条件才恢复：
@@ -2986,7 +3073,7 @@ class Colony {
     this.prodFood = P.food; this.prodEnergy = P.energy;
     for (const k of SPECIAL_KEYS) {
       this.stock[k] = Math.max(0, Math.min(cap[k], (this.stock[k] || 0) + P[k] * dt));
-      this.rates[k] = P[k];
+      this.rates[k] = P[k] - (this.indRun && this.indNeed ? this.indNeed[k] || 0 : 0);   // v0.12：含工业区的消耗
     }
     if (eco) {
       eco.stardust += P.stardust * dt;
@@ -3079,6 +3166,8 @@ class Colony {
       integrity: Math.round(this.integrity * 10) / 10, fallen: this.fallen ? 1 : 0, mt: Math.round((this.migT || 0) * 10) / 10, ht: Math.round(this.hatchT * 10) / 10,
       plots: this.plots.map((b) => (b ? [b.type, b.level, b.workers, b.on ? 1 : 0, b.seq, b.brown ? 1 : 0, b.manual ? 1 : 0] : null)),   // v12：第 7 项 = 手动
       cm: this.coreManual ? 1 : 0,   // v12：核心手动
+      it: this.indT ? Math.round(this.indT * 10) / 10 : 0,   // v13：工业区连续运转计时
+      au: this.auto ? [this.auto.base, this.auto.follow || 0] : null,   // v13：自动开拓建的前哨 [所属据点, 已收到的后续开拓者]
     };
   }
 
@@ -3101,6 +3190,8 @@ class Colony {
     this.integrity = s.integrity == null ? FALL.max : s.integrity;
     this.fallen = !!s.fallen;
     if (s.stock.food == null) this.stock.food = Math.round(this.caps().food * 0.5);   // v4 存档迁移：补上食物
+    this.indT = s.it || 0;
+    this.auto = Array.isArray(s.au) ? { base: s.au[0], follow: s.au[1] || 0 } : null;
     if (ver >= 12) this.coreManual = !!s.cm;
     else this.migrateManual();
   }
@@ -3144,13 +3235,16 @@ class Trade {
   attach(world) { this.W = world.W; this.H = world.H; }
 
   // ---------- 查询 ----------
-  port(c) {
-    if (!c) return null;
-    for (const b of c.plots) if (b && b.type === 'port') return b;
-    return null;
+  // v0.12：城市及以上可以有两座贸易站。航线名额 = 各座之和；航程、单船运量取最大的一座；任何一座在工作就能发船
+  ports(c) { return c ? c.plots.filter((b) => b && b.type === 'port') : []; }
+  port(c) { return this.ports(c)[0] || null; }
+  portDef(c) {
+    const ps = this.ports(c);
+    if (!ps.length) return null;
+    const ds = ps.map((b) => BUILDINGS.port.levels[b.level - 1]);
+    return { routes: ds.reduce((n, d) => n + d.routes, 0), cargo: Math.max(...ds.map((d) => d.cargo)), range: Math.max(...ds.map((d) => d.range)), n: ps.length };
   }
-  portDef(c) { const b = this.port(c); return b ? BUILDINGS.port.levels[b.level - 1] : null; }
-  portActive(c) { const b = this.port(c); return !!(b && b.active && !c.fallen); }
+  portActive(c) { return !c.fallen && this.ports(c).some((b) => b.active); }
   range(c) { const d = this.portDef(c); return d ? d.range * c.mul('port') : 0; }
   slots(c) { const d = this.portDef(c); return d ? d.routes : 0; }
   cargoCap(c) { const d = this.portDef(c); return d ? d.cargo : 0; }
@@ -3859,6 +3953,229 @@ class Transfers {
 return { get Transfers() { return Transfers; } };
 })();
 
+// ---- src/econ/pioneers.js ----
+const __m_src_econ_pioneers_js = (() => {
+// v0.12 自动开拓（设计稿 4.2，第一套恒星工业区完成后解锁）。
+// 据点 = 未失守的城市及以上殖民地（默认开启，可以单独关）。每个据点各自计时，每 PIONEER.every 秒试一次：
+//   条件：人口满员、不缺粮、没在受袭（含结束后 TRADE.raidHold 秒）、扣掉物资后矿石 / 食物 / 能量都还在上限的一半以上；不满足就等下一个间隔。
+//   派 1 名开拓者 + PIONEER.cargo 物资（不付星尘）：先给自己建的、后续开拓者不足 follow 名的前哨补人（最近的），
+//   否则开拓 range 以内（表面距离）最近的新星：没有殖民地、扫描过、没有活着的收割者、没标「不开拓」、没有别的开拓者正在前往；同距离选能升得更高的。
+// 开拓者是一艘看得见的小船（速度 / 血量同货船），无人机按打货船的规则追打，被击毁就损失这 1 人和物资。
+// 抵达新星：目标失效（已有殖民地、出现活的收割者、被标为不开拓）就掉头回据点退还（据点没了 / 失守就去最近的己方殖民地）；
+//   没唤醒的星原地唤醒 PIONEER.bloom 秒（期间照样可能被打）；然后建立 1 级前哨（人口 1，库存 = 带来的物资），记下所属据点。
+// 抵达后续：前哨还在、没失守、人口没满 → 人口 +1、物资入库；人口满了 → 物资入库、人飞回据点；都计数 +1。前哨失守 → 掉头回去。
+const { PIONEER, TRADE, CORE_WORKERS, maxLevelFor } = __m_src_econ_config_js;
+const { wrapDelta, mod } = __m_src_world_world_js;
+
+const ok = (msg) => ({ ok: true, msg });
+const no = (msg) => ({ ok: false, msg });
+
+class Pioneers {
+  constructor(eco) {
+    this.eco = eco;
+    this.list = [];       // 在途 / 唤醒中的开拓者：{ id, kind: 'new' | 'follow', base, to, x, y, hp, cargo, state: 'fly' | 'bloom' | 'back', bloomT, home }
+    this.seq = 0;
+    this.bases = {};      // 据点：pid → { on, t }
+    this.noCol = new Set();   // 标为「不开拓」的星（planet id）
+    this.events = [];     // 给画面的事件（Economy.tick 搬进 eco.events）
+  }
+
+  get W() { return this.eco.W; }
+  get H() { return this.eco.H; }
+  get unlocked() { return this.eco.industryUnlocked; }
+  isBase(c) { return !!c && !c.fallen && c.level >= PIONEER.minLevel; }
+  base(c) { return this.bases[c.pid] || (this.bases[c.pid] = { on: true, t: 0 }); }
+  setBase(c, on) { this.base(c).on = !!on; return ok(on ? `${c.planet.name.split(' ')[0]} 会派出开拓者` : `${c.planet.name.split(' ')[0]} 不再派出开拓者`); }
+  markNo(p, on) {
+    const id = (p.base || p).id;
+    if (on) this.noCol.add(id); else this.noCol.delete(id);
+    return ok(on ? `${p.name.split(' ')[0]} 标为不开拓：自动开拓不会去那里` : `${p.name.split(' ')[0]} 取消了「不开拓」`);
+  }
+  // 表面距离（环面最短）
+  surf(a, b) { return Math.hypot(wrapDelta(a.x - b.x, this.W), wrapDelta(a.y - b.y, this.H)) - a.R - b.R; }
+  // 这个据点建立、还活着的前哨
+  outposts(c) { return [...this.eco.colonies.values()].filter((x) => x.auto && x.auto.base === c.pid); }
+  // 据点现在能不能派（返回原因，空串 = 可以）
+  baseBlock(c) {
+    if (!this.isBase(c)) return '不是据点';
+    if (Math.floor(c.pop) < c.popCap()) return '人口没满';
+    if (c.starving) return '缺粮';
+    if (c.raidT < TRADE.raidHold) return '受袭中';
+    if (Math.floor(c.pop) - 1 < CORE_WORKERS) return '人口太少';
+    const cap = c.caps(), P = PIONEER.cargo;
+    for (const k of ['minerals', 'food', 'energy']) if (c.stock[k] - (P[k] || 0) < cap[k] * 0.5) return '库存不到一半';
+    return '';
+  }
+  // 选目标：先补自己的前哨，再开拓新星；都没有返回 null
+  pick(c) {
+    const eco = this.eco, going = new Set(this.list.filter((s) => s.kind === 'new' && s.state !== 'back').map((s) => s.to));
+    const follow = this.outposts(c).filter((o) => !o.fallen && (o.auto.follow || 0) < PIONEER.follow && Math.floor(o.pop) < o.popCap())
+      .map((o) => ({ o, d: this.surf(c.planet, o.planet) })).sort((a, b) => a.d - b.d)[0];
+    if (follow) return { kind: 'follow', p: follow.o.planet };
+    let best = null;
+    for (const p of eco.world ? eco.world.planets : []) {
+      if (p.kind !== 'planet' || eco.colonyOf(p) || !p.st.scanned || this.noCol.has(p.id) || going.has(p.id)) continue;
+      if (p.st.harv.some((h) => h.alive)) continue;
+      const d = this.surf(c.planet, p);
+      if (d > PIONEER.range) continue;
+      const lv = maxLevelFor(p.R);
+      if (!best || d < best.d - 1e-6 || (Math.abs(d - best.d) <= 1e-6 && lv > best.lv)) best = { p, d, lv };
+    }
+    return best ? { kind: 'new', p: best.p } : null;
+  }
+  // 派出一名开拓者（不检查计时；返回 { ok, msg }）
+  send(c) {
+    const why = this.baseBlock(c);
+    if (why) return no(why);
+    const t = this.pick(c);
+    if (!t) return no('附近没有可去的星');
+    const P = PIONEER.cargo;
+    c.pop -= 1;
+    c.fixWorkers();
+    for (const k of ['minerals', 'food', 'energy']) c.stock[k] -= P[k] || 0;
+    const [dx, dy] = this.vec(c.planet, t.p);
+    const L = Math.hypot(dx, dy) || 1;
+    const s = { id: ++this.seq, kind: t.kind, base: c.pid, to: t.p.id, x: mod(c.planet.x + (dx / L) * (c.planet.R + 20), this.W), y: mod(c.planet.y + (dy / L) * (c.planet.R + 20), this.H), hp: PIONEER.hp, cargo: { ...P }, state: 'fly', bloomT: 0, home: null };
+    this.list.push(s);
+    this.eco.stats.pioneersSent = (this.eco.stats.pioneersSent || 0) + 1;
+    return ok(t.kind === 'follow' ? `派开拓者去 ${t.p.name.split(' ')[0]}` : `派开拓者去开拓 ${t.p.name.split(' ')[0]}`);
+  }
+  vec(a, b) { return [wrapDelta(b.x - a.x, this.W), wrapDelta(b.y - a.y, this.H)]; }
+  planet(id) { const w = this.eco.world; return w ? w.findById(id) : null; }
+  // 在空中、会被无人机追打的（唤醒中也算）
+  flying(s) { return this.list.includes(s) && s.hp > 0; }
+  hit(s, dmg) {
+    if (!this.flying(s)) return false;
+    s.hp -= dmg;
+    if (s.hp > 0) return false;
+    this.list.splice(this.list.indexOf(s), 1);
+    const b = this.eco.colonies.get(s.base), p = this.planet(s.to);
+    this.eco.stats.pioneersLost = (this.eco.stats.pioneersLost || 0) + 1;
+    this.events.push({ kind: 'pioneerLost', s, msg: `${b ? b.planet.name.split(' ')[0] : ''} 的开拓者${p ? `在去 ${p.name.split(' ')[0]} 的路上` : ''}被无人机击毁，1 名开拓者和物资丢失` });
+    return true;
+  }
+  // 掉头：回据点；据点没了 / 失守就去最近的己方殖民地；一个都没有就散失
+  turnBack(s, why) {
+    let home = this.eco.colonies.get(s.base);
+    if (!home || home.fallen) {
+      home = null; let bd = Infinity;
+      for (const c of this.eco.colonies.values()) { if (c.fallen) continue; const d = Math.hypot(wrapDelta(c.planet.x - s.x, this.W), wrapDelta(c.planet.y - s.y, this.H)); if (d < bd) { bd = d; home = c; } }
+    }
+    if (!home) { this.list.splice(this.list.indexOf(s), 1); return; }
+    s.state = 'back'; s.home = home.pid;
+    if (why) this.events.push({ kind: 'pioneerBack', s, msg: why });
+  }
+  // 抵达一颗殖民地：人和物资放进去（放不下的物资丢掉；人口满了人也照样放进去——回家的人不会被拒之门外）
+  unload(s, c) {
+    c.pop += 1;
+    const cap = c.caps();
+    for (const k of ['minerals', 'food', 'energy']) c.stock[k] = Math.min(cap[k], c.stock[k] + (s.cargo[k] || 0));
+    s.cargo = { minerals: 0, food: 0, energy: 0 };
+  }
+
+  update(dt) {
+    const eco = this.eco;
+    if (!this.unlocked) return;
+    // 据点计时
+    for (const c of eco.colonies.values()) {
+      if (!this.isBase(c)) continue;
+      const b = this.base(c);
+      if (!b.on) { b.t = 0; continue; }
+      b.t += dt;
+      if (b.t >= PIONEER.every) { b.t -= PIONEER.every; this.send(c); }
+    }
+    // 飞行
+    for (const s of [...this.list]) {
+      if (!this.list.includes(s)) continue;
+      const tgt = s.state === 'back' ? (eco.colonies.get(s.home) || null) : null;
+      const p = s.state === 'back' ? (tgt && tgt.planet) : this.planet(s.to);
+      if (!p) { this.turnBack(s); continue; }
+      if (s.state === 'back' && (!tgt || tgt.fallen)) { this.turnBack(s); continue; }
+      if (s.state === 'bloom') { this.blooming(s, p, dt); continue; }
+      const [dx, dy] = this.vec(s, p);
+      const L = Math.hypot(dx, dy) || 1;
+      const left = L - p.R - 20;
+      const step = PIONEER.speed * dt;
+      s.ux = dx / L; s.uy = dy / L;
+      if (left > step) { s.x = mod(s.x + s.ux * step, this.W); s.y = mod(s.y + s.uy * step, this.H); continue; }
+      s.x = mod(s.x + s.ux * Math.max(0, left), this.W); s.y = mod(s.y + s.uy * Math.max(0, left), this.H);
+      this.arrive(s, p);
+    }
+  }
+
+  arrive(s, p) {
+    const eco = this.eco;
+    if (s.state === 'back') {
+      const c = eco.colonies.get(s.home);
+      if (c && !c.fallen) this.unload(s, c);
+      this.list.splice(this.list.indexOf(s), 1);
+      return;
+    }
+    if (s.kind === 'follow') {
+      const o = eco.colonyOf(p);
+      if (!o || o.fallen || !o.auto) { this.turnBack(s, `开拓者到了 ${p.name.split(' ')[0]}，前哨已经不在了，掉头回去`); return; }
+      o.auto.follow = (o.auto.follow || 0) + 1;
+      if (Math.floor(o.pop) < o.popCap()) { this.unload(s, o); this.list.splice(this.list.indexOf(s), 1); }
+      else {   // 人口满了：物资入库，人回据点
+        const cap = o.caps();
+        for (const k of ['minerals', 'food', 'energy']) o.stock[k] = Math.min(cap[k], o.stock[k] + (s.cargo[k] || 0));
+        s.cargo = { minerals: 0, food: 0, energy: 0 };
+        this.turnBack(s);
+      }
+      return;
+    }
+    // 新开拓：目标还有效吗
+    const why = eco.colonyOf(p) ? '那里已经有殖民地了' : p.st.harv.some((h) => h.alive) ? '那里长出了收割者' : this.noCol.has(p.id) ? '那里被标为不开拓' : '';
+    if (why) { this.turnBack(s, `开拓者到了 ${p.name.split(' ')[0]}：${why}，掉头回去`); return; }
+    if (!p.st.bloom) { s.state = 'bloom'; s.bloomT = 0; return; }
+    this.found(s, p);
+  }
+
+  blooming(s, p, dt) {
+    const eco = this.eco;
+    if (eco.colonyOf(p) || p.st.harv.some((h) => h.alive) || this.noCol.has(p.id)) { s.state = 'fly'; this.arrive(s, p); return; }
+    s.bloomT += dt;
+    if (s.bloomT < PIONEER.bloom) return;
+    p.st.bloom = true; p.st.reveal = 0;
+    for (const nd of p.st.nodes) nd.fill = 1;
+    eco.onBloom(p);
+    this.events.push({ kind: 'pioneerBloom', p });
+    this.found(s, p);
+  }
+
+  found(s, p) {
+    const base = this.eco.colonies.get(s.base);
+    const c = this.eco.foundOutpost(p, s.cargo, s.base);
+    this.list.splice(this.list.indexOf(s), 1);
+    if (c) this.events.push({ kind: 'outpost', c, msg: `${base ? base.planet.name.split(' ')[0] : '据点'} 的开拓者在 ${p.name.split(' ')[0]} 建立了前哨站` });
+  }
+
+  // ---------- 存档（v13） ----------
+  serialize() {
+    return {
+      seq: this.seq,
+      list: this.list.map((s) => [s.id, s.kind, s.base, s.to, Math.round(s.x), Math.round(s.y), Math.round(s.hp * 10) / 10, s.cargo, s.state, Math.round(s.bloomT * 10) / 10, s.home]),
+      bases: Object.entries(this.bases).map(([pid, b]) => [pid, b.on ? 1 : 0, Math.round(b.t)]),
+      no: [...this.noCol],
+    };
+  }
+  restore(d) {
+    this.list = []; this.bases = {}; this.noCol = new Set(); this.seq = 0;
+    if (!d) return;
+    this.seq = d.seq || 0;
+    for (const a of d.list || []) {
+      if (!Array.isArray(a) || !(a[6] > 0)) continue;
+      this.list.push({ id: a[0], kind: a[1] === 'follow' ? 'follow' : 'new', base: a[2], to: a[3], x: a[4], y: a[5], hp: a[6], cargo: { minerals: 0, food: 0, energy: 0, ...(a[7] || {}) }, state: ['fly', 'bloom', 'back'].includes(a[8]) ? a[8] : 'fly', bloomT: a[9] || 0, home: a[10] || null });
+      this.seq = Math.max(this.seq, a[0] || 0);
+    }
+    for (const [pid, on, t] of d.bases || []) this.bases[pid] = { on: !!on, t: t || 0 };
+    for (const id of d.no || []) this.noCol.add(id);
+  }
+}
+
+return { get Pioneers() { return Pioneers; } };
+})();
+
 // ---- src/econ/milestones.js ----
 const __m_src_econ_milestones_js = (() => {
 // 隐藏里程碑（v0.10）：平时看不到（HUD、引导、面板里都不提），达成时才弹出来。
@@ -3924,7 +4241,8 @@ const __m_src_econ_economy_js = (() => {
 const { Colony, emptyStock } = __m_src_econ_colony_js;
 const { Trade } = __m_src_econ_trade_js;
 const { Transfers } = __m_src_econ_transfers_js;
-const { LEVELS, BUILDINGS, sizeClass, START_POD, START, POD, podStardust, MIGRATION, POP_GROWTH_TIME, POP_FOOD, DEMOLISH_REFUND, SHIP_BASE, SHIP_UPGRADES, SHIPYARD_LEVEL, WARP, RES_ZH, STARDUST, FALL, CORE_WORKERS, SPRITE, HATCH_COST, NEST_POWER, CORE_GUN, LOW_POWER, WRECK, SPECIAL_KEYS, SPECIAL_SRC, SCAN, FINDS, SHIP_CHARGE } = __m_src_econ_config_js;
+const { Pioneers } = __m_src_econ_pioneers_js;
+const { LEVELS, BUILDINGS, sizeClass, START_POD, START, POD, podStardust, MIGRATION, POP_GROWTH_TIME, POP_FOOD, DEMOLISH_REFUND, SHIP_BASE, SHIP_UPGRADES, SHIPYARD_LEVEL, WARP, RES_ZH, STARDUST, FALL, CORE_WORKERS, SPRITE, HATCH_COST, NEST_POWER, CORE_GUN, LOW_POWER, WRECK, SPECIAL_KEYS, SPECIAL_SRC, SCAN, FINDS, SHIP_CHARGE, INDUSTRY, INDUSTRY_TYPES } = __m_src_econ_config_js;
 const { checkMilestones } = __m_src_econ_milestones_js;
 const { wrapDelta } = __m_src_world_world_js;
 
@@ -3967,9 +4285,41 @@ class Economy {
     this.wreckSeq = 0;
     this.trade = new Trade(this);
     this.transfers = new Transfers(this);
+    this.pioneers = new Pioneers(this);   // v0.12 自动开拓
     this.events = [];   // 给画面的事件：{ kind: 'fall' | 'recapture' | 'migrate', ... }
     this.migLog = [];   // 最近的移民记录 { t, from, to }（只给面板显示，不存档）
     this.W = 32000; this.H = 20000;
+    // v0.12 恒星工业区：done = 完成记录 [{ n: 第几套, star, pid, t }]（按完成顺序；每颗恒星一次，失守不撤销）；
+    // tipped = 弹过「灯塔」提示的殖民地；signals = 已经显示的信号段。恒星由哪个殖民地占用，从各殖民地的工业建筑算出来，不存
+    this.industry = { done: [], tipped: [], signals: [] };
+  }
+
+  // ---------- v0.12 恒星工业区 ----------
+  // 殖民地的「工业恒星」：表面到恒星表面 ≤ INDUSTRY.range 的那颗（恒星彼此相隔 8000 以上，最多一颗）；没有时 null。按殖民地缓存
+  industryStar(c) {
+    if (c._indStar !== undefined) return c._indStar;
+    let best = null;
+    const stars = (this.world && this.world.stars) || [];
+    for (const s of stars) {
+      const d = Math.hypot(wrapDelta(s.x - c.planet.x, this.W), wrapDelta(s.y - c.planet.y, this.H)) - s.R - c.planet.R;
+      if (d <= INDUSTRY.range && (!best || d < best.d)) best = { s, d };
+    }
+    c._indStar = best ? best.s : null;
+    return c._indStar;
+  }
+  // 占用这颗恒星的殖民地（有任意一座工业建筑的那个）
+  industryOwner(star) {
+    for (const c of this.colonies.values()) if (c.hasIndustry && this.industryStar(c) === star) return c;
+    return null;
+  }
+  industryDoneAt(star) { return this.industry.done.find((d) => d.star === star.id) || null; }
+  get industryUnlocked() { return this.industry.done.length >= 1; }
+  // 完成一套：记录、事件；第一套解锁人口面板和自动开拓、第一段信号
+  completeIndustry(c, star) {
+    const n = this.industry.done.length + 1;
+    this.industry.done.push({ n, star: star.id, pid: c.pid, t: Math.round(this.time) });
+    this.events.push({ kind: 'industryDone', c, star, n });
+    if (!this.industry.signals.includes(n)) { this.industry.signals.push(n); this.events.push({ kind: 'signal', n }); }
   }
 
   // 绑定星域（贸易、移民要用星域大小算距离）
@@ -4038,14 +4388,14 @@ class Economy {
   // ---------- 殖民舱 ----------
   // 装配一个殖民舱要付的东西（显示和检查用）：矿石 = 舱体 + 带走的
   podCost() {
-    return { colonists: POD.colonists, food: POD.food, energy: POD.energy, minerals: POD.minerals + POD.hull, stardust: podStardust(this.colonies.size) };
+    return { colonists: POD.colonists, food: POD.food, energy: POD.energy, minerals: POD.minerals + POD.hull, stardust: podStardust(this.playerColonies) };   // v0.12：自动开拓建的前哨不算
   }
 
   // 能不能在殖民地 c 装配：返回 { ok, msg, items }，items 是面板 ✓/✗ 清单用的 [ok, text]
   podCheck(c, shipHere) {
     const cost = this.podCost();
     const free = c ? this.spareColonists(c) : 0;   // v0.11.4：空闲不够时可以从自动岗位撤人
-    const n = this.colonies.size + 1;
+    const n = this.playerColonies + 1;
     const f = (k) => Math.floor(this.have(c, k, shipHere));
     const items = [
       [!!shipHere, '飞船停在这里'],
@@ -4119,6 +4469,25 @@ class Economy {
     return ok(first ? `在${p.name}建立了第一个殖民地！` : `在${p.name}建立了新殖民地（第 ${this.colonies.size} 个）`);
   }
 
+  // v0.12：玩家自己建立的殖民地数（殖民舱的星尘价格按它算；自动开拓的前哨不算）
+  get playerColonies() { let n = 0; for (const c of this.colonies.values()) if (!c.auto) n++; return n; }
+  // v0.12 自动开拓建立前哨：1 级、人口 1、库存 = 带来的物资；记下所属据点。扫描照常算（不给星尘）
+  foundOutpost(planet, cargo, basePid) {
+    const p = planet.base || planet;
+    if (this.colonyOf(p)) return null;
+    const c = new Colony(p, 1);
+    c.pop = 1;
+    c.coreWorkers = 1;
+    const caps = c.caps();
+    c.stock = { ...emptyStock(), energy: Math.min(caps.energy, cargo.energy || 0), minerals: Math.min(caps.minerals, cargo.minerals || 0), food: Math.min(caps.food, cargo.food || 0) };
+    c.auto = { base: basePid, follow: 0 };
+    this.colonies.set(p.id, c);
+    p.st.colony = c;
+    if (!p.st.scanned) { p.st.scanned = true; p.st.scan = 1; }
+    this.stats.outposts = (this.stats.outposts || 0) + 1;
+    return c;
+  }
+
   // ---------- 建筑 ----------
   build(c, i, type, shipHere) {
     if (!c.plotOpen(i)) return no(i > c.maxPlots && i < c.plots.length ? `这个建筑位要升到${LEVELS[c.plotLevel(i)].name}才解锁` : '这个位置不能建造');
@@ -4129,6 +4498,11 @@ class Economy {
     if (Object.keys(miss).length) return no(this.missText(miss));
     this.pay(c, cost, shipHere);
     c.addBuilding(i, type);
+    // v0.12：第一次建齐三座工业建筑时，弹一次「灯塔」提示（每个殖民地一次）
+    if (BUILDINGS[type].industry && c.industryPlots().every(Boolean) && !this.industry.tipped.includes(c.pid)) {
+      this.industry.tipped.push(c.pid);
+      this.events.push({ kind: 'industryTip', c });
+    }
     return ok(`建造了${BUILDINGS[type].name}`);
   }
 
@@ -4136,7 +4510,17 @@ class Economy {
   buildLock(c, type) {
     const B = BUILDINGS[type];
     if (B.minLevel && c.level < B.minLevel) return `${B.name}需要${LEVELS[B.minLevel].name}及以上`;
+    if (B.industry) {   // v0.12 恒星工业区：恒星 3000 以内，一颗恒星一个工业区
+      const star = this.industryStar(c);
+      if (!star) return `要建在恒星 ${INDUSTRY.range} 以内的殖民地`;
+      const own = this.industryOwner(star);
+      if (own && own !== c) return `这颗恒星已经有工业区了（${own.planet.name.split(' ')[0]}）`;
+    }
     if (B.unique && c.plots.some((b) => b && b.type === type)) return `每个殖民地只能有一座${B.name}`;
+    if (B.limit) {   // v0.12 贸易站：城市及以上 2 座
+      const n = c.plots.filter((b) => b && b.type === type).length, max = B.limit[c.level] || 1;
+      if (n >= max) return max >= 2 ? `最多 ${max} 座${B.name}` : `每个殖民地只能有一座${B.name}（${LEVELS[4].name}及以上可以建两座）`;
+    }
     return null;
   }
 
@@ -4171,8 +4555,16 @@ class Economy {
       }
     }
     c.plots[i] = null;
-    if (b.type === 'port') for (const r of this.trade.routesFrom(c)) this.trade.remove(r.id);
-    return ok(`拆除了${BUILDINGS[b.type].name}，返还一半资源${b.type === 'port' ? '，这里出发的航线都取消了' : ''}`);
+    // 拆贸易站：一座都不剩就取消这里出发的全部航线；还剩一座（v0.12 城市可以有两座）时，只取消超出名额的航线（后开的先取消）
+    let note = '';
+    if (b.type === 'port') {
+      const T = this.trade, out = T.routesFrom(c).sort((x, y) => y.id - x.id);
+      let cut = T.port(c) ? Math.max(0, T.usedSlots(c) - T.slots(c)) : out.length;
+      const n = cut;
+      for (const r of out) { if (cut <= 0) break; T.remove(r.id); cut--; }
+      note = !T.port(c) ? '，这里出发的航线都取消了' : n ? `，航线名额变少，取消了最后开的 ${n} 条` : '';
+    }
+    return ok(`拆除了${BUILDINGS[b.type].name}，返还一半资源${note}`);
   }
 
   // 手动分配工人：i = 0 表示核心。
@@ -4603,6 +4995,8 @@ class Economy {
     this.time += dt;
     for (const c of this.colonies.values()) {
       c.tick(dt, this);
+      // v0.12：连续运转满 INDUSTRY.complete 秒 → 完成这一套（每颗恒星一次）
+      if (c.indRun && c.indT >= INDUSTRY.complete) { const star = this.industryStar(c); if (star && !this.industryDoneAt(star)) this.completeIndustry(c, star); }
       if (c.fallPending) this.fall(c);
       // 收复：星球重新苏醒、收割者也清干净了
       else if (c.fallen && c.planet.st.bloom && !c.planet.st.harv.some((h) => h.alive)) {
@@ -4619,6 +5013,8 @@ class Economy {
     this.migrate(dt);
     this.trade.update(dt);
     this.transfers.update(dt);
+    this.pioneers.update(dt);   // v0.12 自动开拓
+    if (this.pioneers.events.length) { this.events.push(...this.pioneers.events); this.pioneers.events.length = 0; }
     // 隐藏里程碑：每秒检查一次还没达成的
     this.mileT += dt;
     if (this.mileT >= 1) { this.mileT = 0; checkMilestones(this, this.world); }
@@ -4710,7 +5106,8 @@ class Economy {
     const wrecks = this.wrecks.map((w) => [Math.round(w.x), Math.round(w.y), w.minerals, w.food, w.colonists, w.pod || null, Math.round(this.time - w.t0), { cryo: w.cryo || 0, magma: w.magma || 0, helium: w.helium || 0 }]);
     // v0.10：里程碑 [[id, 达成时间], …]
     const milestones = [...this.milestones];
-    return { stardust: this.stardust, ship: this.ship, time: this.time, won: this.won, wonAt: this.wonAt, stats: this.stats, cols, trade: this.trade.serialize(), sprites, spriteSeq: this.spriteSeq, transfers: this.transfers.serialize(), wrecks, milestones };
+    const industry = { done: this.industry.done.map((d) => ({ ...d })), tipped: [...this.industry.tipped], signals: [...this.industry.signals] };   // v13
+    return { stardust: this.stardust, ship: this.ship, time: this.time, won: this.won, wonAt: this.wonAt, stats: this.stats, cols, trade: this.trade.serialize(), sprites, spriteSeq: this.spriteSeq, transfers: this.transfers.serialize(), wrecks, milestones, industry, pioneers: this.pioneers.serialize() };
   }
   // ver = 存档版本。v6 之前：建筑位要压紧（legacy）；v7 之前：精灵改版迁移（见 migrateV7）
   restore(s, world, legacy = false, ver = 7) {
@@ -4760,6 +5157,7 @@ class Economy {
       }
     }
     this.transfers.restore(s.transfers, ver);
+    this.pioneers.restore(ver >= 13 ? s.pioneers : null);   // v0.12：v12 及更早没有
     for (const sp of this.sprites) delete sp.savedPos;
     this.refreshGarrisons();
     if (ver < 8) this.migrateV8();
@@ -4768,6 +5166,9 @@ class Economy {
     for (const a of s.wrecks || []) this.wrecks.push({ id: ++this.wreckSeq, x: a[0], y: a[1], minerals: a[2] || 0, food: a[3] || 0, ...{ cryo: 0, magma: 0, helium: 0, ...(a[7] || {}) }, colonists: a[4] || 0, pod: a[5] || null, t0: this.time - (a[6] || 0) });
     // v0.10 隐藏里程碑。读 v8 及更早的存档：已经满足的悄悄补记（不弹卡，奖励照给），免得一读档弹一串
     this.milestones = new Map((s.milestones || []).map(([id, t]) => [id, t]));
+    // v0.12 恒星工业区：v12 及更早没有（全部为空）
+    const ind = s.industry || {};
+    this.industry = { done: (ind.done || []).filter((d) => d && d.star).map((d) => ({ n: d.n, star: d.star, pid: d.pid, t: d.t || 0 })), tipped: [...(ind.tipped || [])], signals: [...(ind.signals || [])] };
     this.droneKillT = [];
     if (ver < 9) { this.migratedV9 = { miles: checkMilestones(this, world, true).length }; }
   }
@@ -4894,6 +5295,7 @@ class WorldMap {
   }
 
   hitDefense(x, y) { const r = this.defenseBtn; return !!(r && this.open && x >= r[0] && x <= r[2] && y >= r[1] && y <= r[3]); }
+  hitEmpire(x, y) { const r = this.empireBtn; return !!(r && this.open && x >= r[0] && x <= r[2] && y >= r[1] && y <= r[3]); }   // v0.12「帝国」按钮
 
   hitGarrison(x, y) {
     if (!this.open) return null;
@@ -4980,6 +5382,14 @@ class WorldMap {
     glow(world.spawn.x, world.spawn.y, SPAWN.beacon);
     for (const p of world.planets) if (p.st.bloom && world.discovered.has(p.id)) glow(p.x, p.y, p.R * SPAWN.planetLightR + SPAWN.planetLight);
     if (eco) for (const c of eco.colonies.values()) if (!c.fallen) glow(c.planet.x, c.planet.y, colonyLight(c));
+    // v0.12：运转中的恒星工业区：琥珀色的灯塔光环（灯光已经按大都市算进上面的光晕）
+    if (eco) for (const c of eco.colonies.values()) {
+      if (!c.indRun) continue;
+      const [x, y] = toS(c.planet.x, c.planet.y), r0 = Math.max(6, c.planet.R * s);
+      ctx.strokeStyle = `rgba(255,179,71,${0.55 + 0.25 * Math.sin(time * 3)})`; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(x, y, r0 + 6, 0, TAU); ctx.stroke();
+      ctx.strokeStyle = 'rgba(255,179,71,0.25)'; ctx.beginPath(); ctx.arc(x, y, r0 + 12 + ((time * 8) % 10), 0, TAU); ctx.stroke();
+    }
     // 行星：已发现的才显示；苏醒的是彩色，枯萎的是灰色，有收割者的带红点
     const showNames = s > 0.03 && t > 0.6;
     for (const p of world.planets) {
@@ -4991,6 +5401,10 @@ class WorldMap {
       if (p.st.harv.some((h) => h.alive)) {
         ctx.fillStyle = '#ff4a5e';
         ctx.beginPath(); ctx.arc(x + r * 0.8, y - r * 0.8, 1.8, 0, TAU); ctx.fill();
+      }
+      if (eco && eco.pioneers && eco.pioneers.noCol.has(p.id) && !p.st.colony) {   // v0.12「不开拓」标记
+        ctx.strokeStyle = '#ff9aa8'; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(x - r - 3, y - r - 3); ctx.lineTo(x + r + 3, y + r + 3); ctx.moveTo(x + r + 3, y - r - 3); ctx.lineTo(x - r - 3, y + r + 3); ctx.stroke();
       }
       if (showNames && p.R * s > 3 && !p.st.colony) {
         ctx.font = `500 10px ${FONT}`;
@@ -5078,6 +5492,19 @@ class WorldMap {
         const [x, y] = toS(source.planet.x, source.planet.y);
         ctx.strokeStyle = '#9dffc888'; ctx.setLineDash([6, 5]); ctx.lineWidth = 1.5;
         for (const ox of [-mw, 0, mw]) for (const oy of [-mh, 0, mh]) { ctx.beginPath(); ctx.arc(x + ox, y + oy, (source.planet.R + DEPLOY.range) * s, 0, TAU); ctx.stroke(); } ctx.setLineDash([]);
+      }
+      // v0.12 开拓者：浅绿色小点 + 去向虚线
+      if (eco.pioneers) for (const pi of eco.pioneers.list) {
+        const [x, y] = toS(pi.x, pi.y);
+        const dp = pi.state === 'back' ? eco.colonies.get(pi.home)?.planet : world.findById(pi.to);
+        if (dp && pi.state !== 'bloom') {
+          const dx = wrapDelta(dp.x - pi.x, world.W) * s, dy = wrapDelta(dp.y - pi.y, world.H) * s;
+          ctx.strokeStyle = '#9dffc866'; ctx.setLineDash([2, 4]); ctx.lineWidth = 1.2;
+          ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + dx, y + dy); ctx.stroke(); ctx.setLineDash([]);
+        }
+        ctx.fillStyle = pi.under > 0 ? '#ff4a5e' : '#9dffc8';
+        ctx.beginPath(); ctx.arc(x, y, 3, 0, TAU); ctx.fill();
+        if (s > 0.02) { ctx.font = `600 10px ${FONT}`; ctx.fillText(pi.state === 'bloom' ? '开拓者 · 唤醒中' : '开拓者', x, y - 9); }
       }
       for (const task of eco.transfers.active()) {
         if (!eco.transfers.exposed(task)) continue;
@@ -5183,6 +5610,14 @@ class WorldMap {
       ctx.fillStyle = raids ? '#692c43' : '#1d3454'; ctx.beginPath(); ctx.roundRect(dcx - dw / 2, dy, dw, dh, 10); ctx.fill();
       ctx.fillStyle = '#e6ecff'; ctx.fillText(`星图调防${raids ? ` · ${raids} 处遭袭` : ''}`, dcx, dy + dh / 2);
       this.defenseBtn = ta > 0.9 ? [dcx - dw / 2, dy, dcx + dw / 2, dy + dh] : null;
+      // v0.12「帝国」按钮：第一套恒星工业区完成后出现，在「星图调防」下面
+      if (eco && eco.industryUnlocked) {
+        const ey = dy + dh + 8;
+        const n = eco.pioneers ? eco.pioneers.list.length : 0;
+        ctx.fillStyle = '#2a3a1d'; ctx.beginPath(); ctx.roundRect(dcx - dw / 2, ey, dw, dh, 10); ctx.fill();
+        ctx.fillStyle = '#e6ffe0'; ctx.fillText(`帝国 · 人口与开拓${n ? ` · ${n} 在途` : ''}`, dcx, ey + dh / 2);
+        this.empireBtn = ta > 0.9 ? [dcx - dw / 2, ey, dcx + dw / 2, ey + dh] : null;
+      } else this.empireBtn = null;
       const zoomTip = this.defense ? '点星球选来源／目标 · 绿圈直接飞抵 · 蓝圈搭船 · Esc 退出调防' : this.touch ? '点驻军标记调防 · 点星球管理 · 双指缩放 · 拖动平移' : '点驻军标记调防 · 点星球管理 · 滚轮缩放 · 拖动平移';
       const lines = narrow
         ? ['彩色 = 已苏醒 · 灰色 = 枯萎 · 红点 = 看得见的敌人（飞船附近、殖民地灯光里；大红点带虚线 = 正在袭击）', '旗子 = 殖民地 · 光晕 = 被照亮，不刷怪 · ★ = 丰度 · ● 特产 · ◆ 遗迹 · ■ 埋藏物资', zoomTip]
@@ -5274,7 +5709,7 @@ return { get MAP_FROM() { return MAP_FROM; }, get MAP_TO() { return MAP_TO; }, g
 const __m_src_ui_colonyPanel_js = (() => {
 // 殖民地面板（降落后按 E 打开，鼠标点选）
 // 只负责显示和转发操作，规则都在 econ/economy.js 里。
-const { LEVELS, BUILDINGS, BUILD_ORDER, TYPE_BONUS, SHIP_UPGRADES, SHIPYARD_LEVEL, WARP, RES_ZH, POP_FOOD, CLUSTER, TRADE, POD, CORE_WORKERS, SPRITE, HATCH_COST, NEST_POWER, NEST_GAS, SPECIAL, SPECIAL_KEYS, SPECIAL_PROD, SPECIAL_SRC, SPECIAL_CAP, RES_COLOR, FINDS, maxLevelFor, sizeClass, SPRITE_ENERGY, SHIP_CHARGE } = __m_src_econ_config_js;
+const { LEVELS, BUILDINGS, BUILD_ORDER, TYPE_BONUS, SHIP_UPGRADES, SHIPYARD_LEVEL, WARP, RES_ZH, POP_FOOD, CLUSTER, TRADE, POD, CORE_WORKERS, SPRITE, HATCH_COST, NEST_POWER, NEST_GAS, SPECIAL, SPECIAL_KEYS, SPECIAL_PROD, SPECIAL_SRC, SPECIAL_CAP, RES_COLOR, FINDS, maxLevelFor, sizeClass, SPRITE_ENERGY, SHIP_CHARGE, INDUSTRY, INDUSTRY_TYPES } = __m_src_econ_config_js;
 const { richLabel } = __m_src_world_survey_js;
 const { mmss } = __m_src_ui_map_js;
 
@@ -5343,7 +5778,7 @@ const CSS = `
 @media (max-width:520px){#sg-colony{top:auto;bottom:8px;left:8px;width:auto;right:8px;max-width:none;max-height:62vh}}
 `;
 
-const COLOR = { miner: '#ff7a45', power: '#3d6fd0', farm: '#9be06a', housing: '#f4f2ff', storage: '#c6c2e4', greenhouse: '#5fbf6a', nest: '#9dffc8' };
+const COLOR = { miner: '#ff7a45', power: '#3d6fd0', farm: '#9be06a', housing: '#f4f2ff', storage: '#c6c2e4', greenhouse: '#5fbf6a', nest: '#9dffc8', siphon: '#ffb347', amplifier: '#b48cff', cooler: '#7fe0f0' };
 const fmtCost = (cost) => (cost ? Object.entries(cost).map(([k, v]) => `${RES_ZH[k]} ${v}`).join(' · ') : '');
 const r1 = (v) => (Math.abs(v) < 10 ? v.toFixed(2) : v.toFixed(1));
 const sign = (v) => (v >= 0 ? '+' : '') + r1(v);
@@ -5605,7 +6040,7 @@ class ColonyPanel {
         <div class="row"><button class="a pri" data-act="colonize" ${chk.ok ? '' : 'disabled'}>建立殖民地</button></div>`;
     } else {
       const cost = eco.podCost();
-      h += `<div class="dim" style="margin-top:6px">飞船上没有殖民舱。到任意殖民地的「搬运」页装配一个。下一个殖民舱需要：${cost.colonists} 名殖民者 · 食物 ${cost.food} · 能量 ${cost.energy} · 矿石 ${cost.minerals} · 星尘 ${cost.stardust}（第 ${eco.colonies.size + 1} 个殖民地）</div>`;
+      h += `<div class="dim" style="margin-top:6px">飞船上没有殖民舱。到任意殖民地的「搬运」页装配一个。下一个殖民舱需要：${cost.colonists} 名殖民者 · 食物 ${cost.food} · 能量 ${cost.energy} · 矿石 ${cost.minerals} · 星尘 ${cost.stardust}（你建立的第 ${eco.playerColonies + 1} 个殖民地；自动开拓的前哨不算）</div>`;
     }
     return h + `</div>${this.shipHtml()}`;
   }
@@ -5691,6 +6126,8 @@ class ColonyPanel {
       const out = eco.sprites.filter((x) => x.tmp && x.post === c.pid).length;
       if (n.temp || out) h += `<button class="a" data-act="recall">召回临时支援${n.temp ? ` · 这里的 ${n.temp} 只回各自驻地` : ''}${out ? ` · 在别处的 ${out} 只回这里` : ''}</button>`;
     }
+    h += this.industryHtml(c);   // v0.12 恒星工业区
+    if (c.auto) { const b = eco.colonies.get(c.auto.base); h += `<div class="dim">自动开拓建立的前哨（来自 ${b ? b.planet.name.split(' ')[0] : '已失去的据点'}）</div>`; }
     h += `<div class="tabs"><button data-act="tab" data-v="colony" class="${this.tab === 'colony' ? 'on' : ''}">殖民地</button>
       <button data-act="tab" data-v="trade" class="${this.tab === 'trade' ? 'on' : ''}">贸易</button>
       <button data-act="tab" data-v="cargo" class="${this.tab === 'cargo' ? 'on' : ''}" ${this.remote ? 'disabled title="飞船要停在这里"' : ''}>搬运</button>
@@ -5700,6 +6137,39 @@ class ColonyPanel {
     else if (this.tab === 'cargo') h += this.cargoHtml(c);
     else if (this.tab === 'trade') h += this.tradeHtml(c);
     else h += this.shipUpHtml(c);
+    return h;
+  }
+
+  // v0.12 恒星工业区状态卡：有资格的殖民地才显示
+  industryHtml(c) {
+    const { eco } = this.h;
+    const star = eco.industryStar(c);
+    if (!star) return '';
+    const own = eco.industryOwner(star), done = eco.industryDoneAt(star);
+    const sName = `${star.name.split(' ')[0]}（${star.typeZh}）`;
+    if (own && own !== c) return `<div class="dim">附近的恒星 ${sName} 的工业区在 ${own.planet.name.split(' ')[0]}${done ? `（第 ${done.n} 套，已完成）` : ''}</div>`;
+    if (!c.hasIndustry) {
+      return `<div class="card" style="border-color:#5a4a2a"><div class="n" style="color:#ffd77a">恒星工业区 · ${sName}</div>
+        <div class="dim">这里离恒星不到 ${INDUSTRY.range / 1000}k，可以建恒星工业区：恒星汲能站、信号放大站、冷却站，每座 ${BUILDINGS.siphon.levels[0].workers} 人，三座都满员、氦 / 熔核 / 冰晶都有，整套才运转。在空地上建造。</div></div>`;
+    }
+    const bs = c.industryPlots();
+    const k = INDUSTRY.star[star.type] || INDUSTRY.star.yellow;
+    const need = c.indNeed || { helium: INDUSTRY.use.helium * k[1], magma: INDUSTRY.use.magma, cryo: INDUSTRY.use.cryo * k[2] };
+    const run = c.indRun;
+    const chip = run ? '<span class="chip ok">运转中</span>' : `<span class="chip warn">停转</span>`;
+    const mats = ['helium', 'magma', 'cryo'].map((g) => {
+      const st = c.stock[g] || 0, per = need[g] * 60;
+      const left = per > 0 ? st / per : 0;
+      return `${RES_ZH[g]} ${Math.floor(st)}（−${per.toFixed(1)}/分${run ? ` · 约 ${left >= 1 ? Math.floor(left) + ' 分钟' : '不到 1 分钟'}` : ''}）`;
+    }).join(' · ');
+    const ppl = INDUSTRY_TYPES.map((t, i) => (bs[i] ? `${BUILDINGS[t].name} ${bs[i].workers}/${c.def(bs[i]).workers}` : `${BUILDINGS[t].name} 未建`)).join(' · ');
+    let h = `<div class="card" style="border-color:${run ? '#ffb347' : '#5a4a2a'}"><div class="n" style="color:#ffd77a">恒星工业区 · ${sName}${chip}</div>
+      <div class="cost">${ppl}</div><div class="cost">原料：${mats}</div>`;
+    if (run) h += `<div class="cost">富余能量 <span class="pos">+${c.indSurplus.toFixed(2)}/秒</span> · 这颗星像大都市一样明亮</div>`;
+    else if (c.indWhy) h += `<div class="cost neg">停转：${c.indWhy}</div>`;
+    if (done) h += `<div class="dim">第 ${done.n} 套工业区 · 已完成</div>`;
+    else if (run) h += `<div class="dim">连续运转 ${Math.floor(c.indT)}/${INDUSTRY.complete} 秒后完成这一套</div>`;
+    h += `<div class="dim">冷却站附带储能 +${BUILDINGS.cooler.levels[0].cap.energy}。想关停：在工业建筑上按「−」撤下工人（标为手动，不会被补回）</div></div>`;
     return h;
   }
 
@@ -5738,6 +6208,7 @@ class ColonyPanel {
         if (sel) {
           h += '<div class="blist">';
           for (const t of BUILD_ORDER) {
+            if (BUILDINGS[t].industry && !eco.industryStar(c)) continue;   // v0.12：工业建筑只在恒星 3000 以内的殖民地出现
             const L1 = BUILDINGS[t].levels[0];
             const lock = eco.buildLock(c, t);
             const canB = !lock && eco.canPay(c, L1.cost, this.shipHere);
@@ -5759,6 +6230,10 @@ class ColonyPanel {
 
   effectText(c, b, d) {
     const B = BUILDINGS[b.type];
+    if (B.industry) {   // v0.12 恒星工业区
+      const need = c.indNeed && c.indNeed[B.industry];
+      return `${B.desc}${need ? ` · ${RES_ZH[B.industry]} ${(need * 60).toFixed(1)}/分钟（整套运转时）` : ''} · ${d.workers} 人满员才工作`;
+    }
     const tk = +c.typeMul(B.bonus).toFixed(2), cl = c.clusterMul(b.type);
     const k = tk * cl * (c.starving ? 0.7 : 1);
     const parts = [];
@@ -5884,8 +6359,10 @@ class ColonyPanel {
         让每颗星球专心做自己擅长的事（类地种地、沙漠挖矿、熔岩发电），再用航线互补，比样样都自己做更划算。</div></div>`;
     } else {
       const d = T.portDef(c);
-      h += `<div class="card"><div class="n">贸易站 ${port.level} 级<span class="chip ${T.portActive(c) ? 'ok' : 'warn'}">${T.portActive(c) ? '运行' : port.status || '停工'}</span></div>
-        <div class="cost">航线 ${T.usedSlots(c)}/${d.routes}${eco.transfers.slots(c) ? `（含旧运兵船 ${eco.transfers.slots(c)}）` : ''} · 货船容量 ${d.cargo} ＋ 精灵 1 只 · 最远 ${fmtK(T.range(c))}${c.mul('port') > 1 ? '（冰窖 +30%）' : ''}</div></div>`;
+      const ps = T.ports(c);
+      h += `<div class="card"><div class="n">贸易站 ${ps.map((b) => `${b.level} 级`).join(' + ')}<span class="chip ${T.portActive(c) ? 'ok' : 'warn'}">${T.portActive(c) ? '运行' : port.status || '停工'}</span></div>
+        <div class="cost">航线 ${T.usedSlots(c)}/${d.routes}${eco.transfers.slots(c) ? `（含旧运兵船 ${eco.transfers.slots(c)}）` : ''} · 货船容量 ${d.cargo} ＋ 精灵 1 只 · 最远 ${fmtK(T.range(c))}${c.mul('port') > 1 ? '（冰窖 +30%）' : ''}</div>
+        ${d.n > 1 ? '<div class="dim">两座贸易站：航线名额相加，航程和货船容量取较大的一座</div>' : c.level >= 4 ? `<div class="dim">${LEVELS[c.level].name}可以再建一座贸易站，航线名额相加</div>` : ''}</div>`;
     }
     // 从这里出发的航线
     const out = T.routesFrom(c);
@@ -6205,6 +6682,124 @@ function syncChildren(parent, next) {
 return { get DefensePanel() { return DefensePanel; } };
 })();
 
+// ---- src/ui/empirePanel.js ----
+const __m_src_ui_empirePanel_js = (() => {
+// v0.12 帝国人口面板（设计稿 4.1，第一套恒星工业区完成后解锁）：只做查看和开关，不新增人口规则。
+//   - 全部殖民地：人口 / 上限、空闲、是否在增长、不增长的原因、最近 10 分钟的迁入迁出
+//   - 开拓据点：开关、下一次派出 / 为什么派不了、在路上的开拓者、建立的前哨（后续开拓者 n / 3）
+//   - 标为「不开拓」的星：可以取消
+const { PIONEER, LEVELS } = __m_src_econ_config_js;
+const { mmss } = __m_src_ui_map_js;
+
+const esc = (v) => String(v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const short = (p) => esc(p.name.split(' ')[0]);
+const CSS = `
+#sg-empire{position:fixed;z-index:10;right:16px;top:64px;width:400px;max-width:calc(100vw - 32px);max-height:calc(100vh - 140px);overflow:auto;display:none;
+  background:#0c1429f5;color:#e5edff;border:1px solid #43577c;border-radius:14px;font:13px/1.5 "PingFang SC","Hiragino Sans GB","Microsoft YaHei",system-ui,sans-serif;
+  box-shadow:0 12px 40px rgba(0,0,0,.5);overscroll-behavior:contain}
+#sg-empire.open{display:block}
+#sg-empire header{position:sticky;top:0;z-index:1;background:#0c1429;display:flex;align-items:center;justify-content:space-between;padding:8px 12px;border-bottom:1px solid #293959}
+#sg-empire h2{font-size:15px;margin:0}
+#sg-empire h3{font-size:13px;margin:10px 0 4px;color:#9fb6e8}
+#sg-empire .body{padding:8px 12px 12px}
+#sg-empire table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+#sg-empire td{padding:4px 2px;border-bottom:1px solid rgba(160,185,255,.08);vertical-align:top}
+#sg-empire td.n{white-space:nowrap}
+#sg-empire .dim{color:#8f9cc0;font-size:12px}
+#sg-empire .ok{color:#9dffc8}#sg-empire .warn{color:#ffd08a}#sg-empire .bad{color:#ff9aa8}
+#sg-empire button{font:inherit;font-size:12px;color:#dfe8ff;background:#1d2a5a;border:1px solid #33467a;border-radius:7px;padding:3px 9px;cursor:pointer}
+#sg-empire button.on{background:#2d6a4f;border-color:#52b788;color:#eafff3}
+#sg-empire .card{border:1px solid #233258;border-radius:10px;padding:8px 10px;margin:6px 0;background:#101a36}
+#sg-empire .row{display:flex;align-items:center;gap:8px;justify-content:space-between}
+@media(max-width:600px){#sg-empire{left:8px;right:8px;top:auto;bottom:8px;width:auto;max-width:none;max-height:55vh}#sg-empire button{min-height:36px}}
+`;
+
+class EmpirePanel {
+  constructor(hooks) {
+    this.h = hooks;   // { eco }
+    this.t = 0;
+    const st = document.createElement('style'); st.textContent = CSS; document.head.appendChild(st);
+    this.el = document.createElement('section'); this.el.id = 'sg-empire'; this.el.setAttribute('aria-label', '帝国'); document.body.appendChild(this.el);
+    this.el.addEventListener('pointerdown', (e) => { e.stopPropagation(); this.pressed = true; });
+    for (const name of ['pointerup', 'pointercancel', 'pointerleave']) this.el.addEventListener(name, () => { this.pressed = false; });
+    this.el.addEventListener('click', (e) => this.click(e));
+    this.el.addEventListener('wheel', (e) => e.stopPropagation(), { passive: true });
+  }
+  get eco() { return this.h.eco; }
+  get isOpen() { return this.el.classList.contains('open'); }
+  open() { if (!this.eco.industryUnlocked) return; this.msg = ''; this.el.classList.add('open'); this.render(); this.el.scrollTop = 0; }
+  close() { this.el.classList.remove('open'); }
+  toggle() { this.isOpen ? this.close() : this.open(); }
+  update(dt) {
+    if (!this.isOpen) return;
+    this.t += dt;
+    if (this.t >= 0.5 && !this.pressed) { this.t = 0; this.render(); }
+  }
+  click(e) {
+    const b = e.target.closest('button[data-act]');
+    if (!b) return;
+    const eco = this.eco, P = eco.pioneers, act = b.dataset.act;
+    if (act === 'close') { this.close(); return; }
+    if (act === 'base') { const c = eco.colonies.get(b.dataset.id); if (c) this.msg = P.setBase(c, !P.base(c).on).msg; }
+    if (act === 'unmark') { const p = eco.world.findById(b.dataset.id); if (p) this.msg = P.markNo(p, false).msg; }
+    this.render();
+  }
+
+  // 人口不增长的原因（和殖民地面板同一套说法）
+  growWhy(c) {
+    if (c.fallen) return '<span class="bad">失守</span>';
+    if (c.rates.growth > 0) return '<span class="ok">增长中</span>';
+    if (c.pop >= c.popCap()) return '人口已满';
+    if (c.starving) return '<span class="bad">缺粮</span>';
+    if (c.stock.food <= 1) return '<span class="warn">食物库存为 0</span>';
+    if (c.stock.energy <= 1) return '<span class="warn">能量库存为 0</span>';
+    return '—';
+  }
+
+  render() {
+    if (!this.isOpen) return;
+    const eco = this.eco, P = eco.pioneers;
+    const cols = [...eco.colonies.values()].sort((a, b) => b.level - a.level || b.pop - a.pop);
+    let pop = 0, cap = 0;
+    for (const c of cols) { pop += Math.floor(c.pop); cap += c.popCap(); }
+    let h = `<header><h2>帝国 · 人口</h2><button data-act="close" aria-label="关闭">✕</button></header><div class="body">`;
+    if (this.msg) h += `<div class="ok">${esc(this.msg)}</div>`;
+    h += `<div class="dim">${cols.length} 个殖民地 · 人口 ${pop} / ${cap}${eco.playerColonies < cols.length ? ` · 其中 ${cols.length - eco.playerColonies} 个是自动开拓的前哨` : ''}</div>`;
+    // 全部殖民地
+    h += '<h3>殖民地</h3><table>';
+    for (const c of cols) {
+      const mig = eco.migRecent ? eco.migRecent(c) : { inn: [], out: [] };
+      const m = [mig.inn.length ? `迁入 ${mig.inn.length}` : '', mig.out.length ? `迁出 ${mig.out.length}` : ''].filter(Boolean).join(' · ');
+      h += `<tr><td class="n">${short(c.planet)}<div class="dim">${LEVELS[c.level].name}${c.auto ? ' · 前哨' : ''}</div></td>
+        <td>${Math.floor(c.pop)}/${c.popCap()} <span class="dim">空闲 ${Math.max(0, c.freePop())}</span><div class="dim">${this.growWhy(c)}${m ? ` · ${m}` : ''}</div></td></tr>`;
+    }
+    h += '</table>';
+    // 开拓据点
+    h += `<h3>开拓据点</h3><div class="dim">${LEVELS[PIONEER.minLevel].name}及以上的殖民地每 ${Math.round(PIONEER.every / 60)} 分钟试着派 1 名开拓者（带食物 ${PIONEER.cargo.food}、能量 ${PIONEER.cargo.energy}、矿石 ${PIONEER.cargo.minerals}，不花星尘）：先给自己建的前哨补 ${PIONEER.follow} 名后续开拓者，再去 ${PIONEER.range / 1000}k 以内扫描过、没有收割者的星建立前哨。要人口满、不缺粮、没受袭，库存扣完还有一半</div>`;
+    const bases = cols.filter((c) => P.isBase(c));
+    if (!bases.length) h += '<div class="dim">还没有城市级的殖民地。</div>';
+    for (const c of bases) {
+      const b = P.base(c), why = P.baseBlock(c), outs = P.outposts(c), fly = P.list.filter((s) => s.base === c.pid);
+      const next = b.on ? (why ? `<span class="warn">暂时派不出：${esc(why)}</span>` : `下一次约 ${mmss(Math.max(0, PIONEER.every - b.t))} 后`) : '已关闭';
+      h += `<div class="card"><div class="row"><b>${short(c.planet)}</b><button data-act="base" data-id="${esc(c.pid)}" class="${b.on ? 'on' : ''}">${b.on ? '开拓：开' : '开拓：关'}</button></div>
+        <div class="dim">${next}</div>`;
+      if (fly.length) h += `<div class="dim">在路上：${fly.map((s) => { const p = eco.world.findById(s.state === 'back' ? (eco.colonies.get(s.home)?.planet.id) : s.to); return `${s.state === 'back' ? '返回' : s.state === 'bloom' ? '唤醒' : s.kind === 'follow' ? '补人' : '开拓'} ${p ? short(p) : '?'}`; }).join('、')}</div>`;
+      if (outs.length) h += `<div class="dim">前哨：${outs.map((o) => `${short(o.planet)}${o.fallen ? '（失守）' : ` ${Math.floor(o.pop)} 人 · 后续 ${Math.min(o.auto.follow || 0, PIONEER.follow)}/${PIONEER.follow}`}`).join('、')}</div>`;
+      h += '</div>';
+    }
+    // 不开拓
+    h += '<h3>标为「不开拓」的星</h3>';
+    const marks = [...P.noCol].map((id) => eco.world.findById(id)).filter(Boolean);
+    if (!marks.length) h += '<div class="dim">没有。在星图上点一颗没有殖民地的星，可以把它标为不开拓。</div>';
+    for (const p of marks) h += `<div class="row card"><span>${short(p)} <span class="dim">${esc(p.typeZh)}</span></span><button data-act="unmark" data-id="${esc(p.id)}">取消</button></div>`;
+    h += '</div>';
+    if (h !== this.last) { const sc = this.el.scrollTop; this.el.innerHTML = h; this.el.scrollTop = sc; this.last = h; }
+  }
+}
+
+return { get EmpirePanel() { return EmpirePanel; } };
+})();
+
 // ---- src/render/colonyDraw.js ----
 const __m_src_render_colonyDraw_js = (() => {
 // 殖民地建筑：扁平插画风，沿星球表面排成一圈（核心在 0 号种子的位置，槽位数由星球的最高等级决定）
@@ -6328,6 +6923,33 @@ const DRAW = {
       const a = t * 1.5 + (i / (lv + 1)) * TAU;
       circ(ctx, Math.cos(a) * (8 + lv), -15 + Math.sin(a) * 4, 1.6, '#ffffff');
     }
+  },
+  // v0.12 恒星工业区
+  siphon(ctx, lv, t, on) {   // 恒星汲能站：朝天的碟形接收器
+    rect(ctx, -1.5, -12, 3, 12, C.metal);
+    poly(ctx, [-12, -20, 12, -20, 7, -13, -7, -13], C.orangeD);
+    poly(ctx, [-12, -20, 0, -20, 0, -13, -7, -13], C.orange);
+    rect(ctx, -0.8, -27, 1.6, 7, C.metalL);
+    circ(ctx, 0, -28, 2.2, on ? C.yellow : C.metalL);
+    if (on) { ctx.globalAlpha = 0.35 + 0.25 * Math.sin(t * 6); circ(ctx, 0, -28, 5, C.yellow); ctx.globalAlpha = 1; }
+  },
+  amplifier(ctx, lv, t, on) {   // 信号放大站：高塔 + 向外扩散的信号环
+    poly(ctx, [-6, 0, -2, -34, 2, -34, 6, 0], C.hullD);
+    poly(ctx, [-6, 0, -2, -34, 0, -34, 0, 0], C.hull);
+    for (let i = 0; i < 3; i++) rect(ctx, -4 + i * 0.6, -10 - i * 8, 8 - i * 1.2, 1.4, C.teal);
+    circ(ctx, 0, -36, 2.4, on ? C.purple : C.metalL);
+    if (on) {
+      ctx.strokeStyle = C.purple; ctx.lineWidth = 1.2;
+      for (let i = 0; i < 2; i++) { const k = ((t * 0.9) + i / 2) % 1; ctx.globalAlpha = 1 - k; ctx.beginPath(); ctx.arc(0, -36, 3 + k * 14, Math.PI * 1.1, Math.PI * 1.9); ctx.stroke(); }
+      ctx.globalAlpha = 1;
+    }
+  },
+  cooler(ctx, lv, t, on) {   // 冷却站：矮罐 + 散热片 + 冷气
+    rect(ctx, -10, -12, 20, 12, C.glassD);
+    rect(ctx, -10, -12, 10, 12, C.glass);
+    for (let i = 0; i < 4; i++) rect(ctx, -9 + i * 5, -16, 2, 4, C.hullD);
+    rect(ctx, -10, -6, 20, 1.6, C.hull);
+    if (on) { const k = (t * 0.7) % 1; ctx.globalAlpha = 0.6 * (1 - k); circ(ctx, Math.sin(t * 2) * 4, -18 - k * 10, 2 + k * 2, '#e8fbff'); ctx.globalAlpha = 1; }
   },
   warp(ctx, lv, t) {
     poly(ctx, [-5, 0, -1.5, -38, 1.5, -38, 5, 0], C.hullD);
@@ -6455,6 +7077,8 @@ class Cards {
   // kind：'scan' | 'dig' | 'mile' | 'defense'（v0.11.3：援军晚到、驻地遇袭）。action = { label, fn }：卡片上的按钮（比如「召回」）
   push(title, text, kind = 'scan', dur = 4.5, action = null) { this.queue.push({ title, text, kind, t: 0, dur, action }); if (this.queue.length > 8) this.queue.shift(); }
   clear() { this.queue.length = 0; this.cur = null; }
+  // 马上显示（v0.12：星图上点星球的「不开拓」卡）：正在显示的卡放回队首
+  now(title, text, kind = 'scan', dur = 4.5, action = null) { if (this.cur && this.cur.t < this.cur.dur - 0.5) this.queue.unshift(this.cur); this.cur = { title, text, kind, t: 0, dur, action }; this.key = ''; }
 
   update(dt) {
     if (!this.cur && this.queue.length) { this.cur = this.queue.shift(); this.key = ''; }
@@ -9138,8 +9762,8 @@ return { get Audio() { return Audio; } };
 const __m_src_core_saves_js = (() => {
 // 存档槽：3 个槽位，当前槽位自动保存。每个槽位存一份完整的游戏存档（格式见 main.js 的 snapshot()）。
 const SLOT_COUNT = 3;
-// 存档格式版本（main.js 的 snapshot() 写进 v）：v12 = v0.11.4（建筑和核心的手动标记）
-const SAVE_VERSION = 12;
+// 存档格式版本（main.js 的 snapshot() 写进 v）：v12 = v0.11.4（建筑和核心的手动标记）；v13 = v0.12（恒星工业区、自动开拓）
+const SAVE_VERSION = 13;
 const slotKey = (n) => `sg2.slot.${n}`;
 const META_KEY = 'sg2.slots';
 // v0.9.1 之前只有一个存档，第一次打开时搬到槽位 1
@@ -9318,7 +9942,7 @@ return { get encodeSave() { return encodeSave; }, get checkSave() { return check
 // ---- src/core/version.js ----
 const __m_src_core_version_js = (() => {
 // 版本号：显示在主菜单里，方便测试的亲友反馈问题时说明版本；网页版的离线缓存也用它区分版本
-const VERSION = '0.11.5';
+const VERSION = '0.12.0';
 
 return { get VERSION() { return VERSION; } };
 })();
@@ -10022,8 +10646,9 @@ const { Sprites } = __m_src_entities_sprites_js;
 const { Economy } = __m_src_econ_economy_js;
 const { ColonyPanel } = __m_src_ui_colonyPanel_js;
 const { DefensePanel } = __m_src_ui_defensePanel_js;
+const { EmpirePanel } = __m_src_ui_empirePanel_js;
 const { drawColony } = __m_src_render_colonyDraw_js;
-const { LEVELS, TYPE_BONUS, START, maxLevelFor, LOW_POWER, WRECK, FINDS, RES_ZH, SPECIAL } = __m_src_econ_config_js;
+const { LEVELS, TYPE_BONUS, START, maxLevelFor, LOW_POWER, WRECK, FINDS, RES_ZH, SPECIAL, INDUSTRY } = __m_src_econ_config_js;
 const { CARGO_KEYS } = __m_src_econ_economy_js;
 const { MILESTONES } = __m_src_econ_milestones_js;
 const { richLabel } = __m_src_world_survey_js;
@@ -10333,6 +10958,9 @@ const defensePanel = new DefensePanel({
   manage: (c) => colonyPanel.open(c.planet, !(player.ground && player.ground.base === c.planet)),
 });
 
+// v0.12 帝国人口面板（第一套恒星工业区完成后，星图上出现「帝国」按钮）
+const empirePanel = new EmpirePanel({ get eco() { return eco; } });
+
 // ---------- v0.10：扫描结果、挖掘、里程碑的卡片 ----------
 // 「冰冻行星 · 冰晶 ★★★ · 产冰晶 · 埋藏物资」
 function surveyText(p, sv) {
@@ -10360,6 +10988,22 @@ let victoryEl = null;
 function handleEcoEvents() {
   for (const ev of eco.events) {
     if (ev.kind === 'transfer') { hud.flash(ev.msg); continue; }
+    // v0.12 自动开拓
+    if (ev.kind === 'pioneerLost' || ev.kind === 'pioneerBack' || ev.kind === 'outpost') { hud.flash(ev.msg); continue; }
+    if (ev.kind === 'pioneerBloom') { const im = world.nearest(ev.p, cam.x, cam.y); if (Math.hypot(im.x - cam.x, im.y - cam.y) < cam.viewRadius + im.R) particles.burst(im.x, im.y, ['157,255,200', '255,224,138', '255,255,255'], 40, 220); continue; }
+    // v0.12 恒星工业区：建齐三座时的「灯塔」提示、完成、信号（文案是提案）
+    if (ev.kind === 'industryTip') { cards.push('恒星工业区', '一旦运转，这颗星会像星夜中的灯塔一样明亮——远处的目光，也会被它吸引。', 'defense', 10); continue; }
+    if (ev.kind === 'industryDone') {
+      const nm = ev.c.planet.name.split(' ')[0];
+      if (ev.n === 1) cards.push('第一套恒星工业区完成', `${nm} 的工业区连续运转了 ${INDUSTRY.complete} 秒。帝国人口面板和自动开拓已经解锁：城市会自己向周边派出开拓者。打开星图，点右上角「星图调防」下面的「帝国」查看`, 'mile', 12);
+      else cards.push(`第 ${ev.n} 套恒星工业区完成`, `${nm} 的工业区连续运转了 ${INDUSTRY.complete} 秒`, 'mile', 8);
+      continue;
+    }
+    if (ev.kind === 'signal') {
+      if (ev.n === 1) cards.push('一段微弱的信号', '放大站对准星域深处时，捕捉到一段信号：微弱、断断续续，却一直在重复同一个节奏。像是有人在很远的地方，一遍又一遍地敲门。', 'mile', 14);
+      else cards.push('信号又清晰了一些', '它还在重复同一个节奏，比上一次清楚了一点，像在等待回应。', 'mile', 10);
+      continue;
+    }
     // v0.11.3：援军晚到留下待命、驻地遇袭而精灵在别处临时支援——卡片上直接给「召回」
     if (ev.kind === 'lateArrival') {
       const c = ev.c;
@@ -10645,7 +11289,8 @@ function handleUIKeys() {
   if (Input.wasPressed('KeyE') || Input.padWasPressed(3)) UI.panel();
   if (Input.wasPressed('KeyM') || Input.padWasPressed(8)) UI.map();
   if (Input.wasPressed('Escape')) {
-    if (defensePanel.isOpen) defensePanel.close();
+    if (empirePanel.isOpen) empirePanel.close();
+    else if (defensePanel.isOpen) defensePanel.close();
     else if (map.open) UI.map();
     else if (colonyPanel.isOpen) colonyPanel.close();
     else if (panel.isOpen) panel.toggle();
@@ -10723,7 +11368,8 @@ canvas.addEventListener('pointermove', (e) => {
 // 在星图上点星球：殖民地 → 打开远程管理；其他星球 → 显示一句介绍
 function mapTap(x, y) {
   if (!map.open) return;
-  if (map.hitDefense(x, y)) { defensePanel.isOpen ? defensePanel.close() : defensePanel.open(); return; }
+  if (map.hitDefense(x, y)) { empirePanel.close(); defensePanel.isOpen ? defensePanel.close() : defensePanel.open(); return; }
+  if (map.hitEmpire(x, y)) { defensePanel.close(); empirePanel.toggle(); return; }   // v0.12
   // v0.10：「丰度」开关
   if (map.hitButton(x, y)) { S.richMap = !S.richMap; saveSettings(); audio.node && audio.node(); return; }
   const badge = map.hitGarrison(x, y);
@@ -10749,7 +11395,12 @@ function mapTap(x, y) {
   closePanel();
   const harv = p.st.harv.filter((h) => h.alive).length;
   const rich = p.st.scanned && p.survey ? ` · ${richLabel(p, p.survey.rich)}${p.survey.find ? ` · ${FINDS[p.survey.find].zh}` : ''}` : ' · 未扫描';
-  hud.flash(`${p.name} · ${p.typeZh}${rich} · ${p.st.bloom ? (harv ? `已苏醒，还有 ${harv} 只收割者` : '已苏醒，可以殖民') : '枯萎'}${p.st.bloom && !harv ? '（要飞过去建立前哨站）' : ''}`);
+  const desc = `${p.name} · ${p.typeZh}${rich} · ${p.st.bloom ? (harv ? `已苏醒，还有 ${harv} 只收割者` : '已苏醒，可以殖民') : '枯萎'}${p.st.bloom && !harv ? '（要飞过去建立前哨站）' : ''}`;
+  // v0.12：自动开拓解锁后，点没有殖民地的星可以标为「不开拓」/ 取消
+  if (eco.industryUnlocked && !eco.colonyOf(p)) {
+    const marked = eco.pioneers.noCol.has(p.id);
+    cards.now(p.name.split(' ')[0], desc + (marked ? ' · 已标为不开拓' : ''), 'scan', 6, { label: marked ? '取消「不开拓」' : '标为不开拓', fn: () => hud.flash(eco.pioneers.markNo(p, !marked).msg) });
+  } else hud.flash(desc);
 }
 canvas.addEventListener('pointerup', dragEnd);
 canvas.addEventListener('pointercancel', dragEnd);
@@ -11004,6 +11655,7 @@ function frame(now) {
     eco.tick(dt);
     colonyPanel.update(dt);
     defensePanel.update(dt);
+    empirePanel.update(dt);
     handleEcoEvents();
     {
       const cur = tutorial.current;
@@ -11083,7 +11735,7 @@ function frame(now) {
     const cc = chargeColony();
     touch.sync(map.open, colonyPanel.isOpen && !colonyPanel.remote, hud.iconsTop, menu.isOpen, state === 'play' && !tow && !!cc && !cc.fallen && player.fuel < eco.fuelMax - 0.5);
   }
-  if (state !== 'play' || cam.zoomTarget * cam.baseH < MAP_FROM) defensePanel.close();
+  if (state !== 'play' || cam.zoomTarget * cam.baseH < MAP_FROM) { defensePanel.close(); empirePanel.close(); }
   map.selected = colonyPanel.isOpen && colonyPanel.remote ? colonyPanel.planet.base : null;
 
   Input.endFrame();
@@ -11122,6 +11774,7 @@ function applySettings() {
   hud.showHelp = S.help;
   hud.scale = S.uiScale;
   defensePanel.el.style.zoom = S.uiScale === 1 ? '' : String(S.uiScale);
+  empirePanel.el.style.zoom = S.uiScale === 1 ? '' : String(S.uiScale);
   colonyPanel.el.style.zoom = S.uiScale === 1 ? '' : String(S.uiScale);
   panel.el.style.zoom = S.uiScale === 1 ? '' : String(S.uiScale);
   resize();
@@ -11208,7 +11861,7 @@ menu.open('title');
 document.addEventListener('visibilitychange', () => { if (document.hidden && state === 'play') { UI.pause(); } });
 
 // 调试接口（测试脚本用）
-window.__sg = { charge, fx, get time() { return time; }, touch, applyTouch, get spawner() { return spawner; }, mapTap, get player() { return player; }, get world() { return world; }, get eco() { return eco; }, get colonyPanel() { return colonyPanel; }, defensePanel, cam, T, hud, map, panel, particles, get garden() { return garden; }, sprites, rescue, get tow() { return tow; }, menu, S, UI, tutorial, get state() { return state; }, get slot() { return slot; }, writeSave, cards };
+window.__sg = { charge, empirePanel, fx, get time() { return time; }, touch, applyTouch, get spawner() { return spawner; }, mapTap, get player() { return player; }, get world() { return world; }, get eco() { return eco; }, get colonyPanel() { return colonyPanel; }, defensePanel, cam, T, hud, map, panel, particles, get garden() { return garden; }, sprites, rescue, get tow() { return tow; }, menu, S, UI, tutorial, get state() { return state; }, get slot() { return slot; }, writeSave, cards };
 
 requestAnimationFrame(frame);
 
